@@ -1,0 +1,17 @@
+﻿Files already downloaded and verified
+Files already downloaded and verified
+Train: 50000, Val portion: 3000, Hidden test: 7000, Visible pool: 53000
+Agent train: 49979, Agent val: 3021 (val_ratio=0.057, val_seed=42)
+
+=== Pretraining Barlow Twins for 20 epochs ===
+Pretrain Epoch 1/20: Loss=1625.8858
+Pretrain Epoch 20/20: Loss=740.8592
+Saved pretrained backbone to model_checkpoint/backbone.pt
+
+=== Linear evaluation (100 epochs, seed=100) ===
+
+=== VAL Results ===
+  Linear probe accuracy: 0.188017
+
+Saved results to results_tmp/val_info.json
+LOCAL_EVAL val_acc=0.188017 seconds=1506.5

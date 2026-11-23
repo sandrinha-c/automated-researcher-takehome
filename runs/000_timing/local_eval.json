@@ -1,0 +1,11 @@
+{
+  "val_acc": 0.10360807925462723,
+  "budget": {
+    "pretrain_epochs": 2,
+    "linear_eval_epochs": 100,
+    "batch_size": 512,
+    "linear_batch_size": 256
+  },
+  "seconds": 253.7,
+  "harness_sha256": "259ecb6454ea7862636fbda7bc836e1daa90cb11a5c1f4165d2d7a816cede893"
+}

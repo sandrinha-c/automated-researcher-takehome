@@ -1,0 +1,26 @@
+# Exam brief (not ours to redistribute)
+take-home-exam-automation.pdf
+
+# Secrets
+.env
+*.key
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Data, checkpoints, heavy outputs
+data/
+datasets/
+*.ckpt
+*.pt
+*.pth
+wandb/
+lightning_logs/
+
+# Editor / OS
+.vscode/
+.DS_Store
+Thumbs.db

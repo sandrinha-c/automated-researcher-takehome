@@ -60,9 +60,42 @@ Each run directory holds copies of `algorithm.py`, `train_eval_baseline.py` and
 | (official, reference only) | unmodified | 130 ep | 47.77% | — |
 
 **Run-to-run noise.** Two identical runs differ by 1.29 percentage points; pretrain losses
-already differ at epoch 1, so the variation comes from GPU nondeterminism during training,
-not from the data split. A single-run difference smaller than about this size is not
-evidence of improvement. The loop uses `001_baseline` (18.80%) as the initial best.
+already differ at epoch 1. [tools/determinism_check.py](tools/determinism_check.py) shows
+why: input batches are bit-identical across runs (same data and augmentation), the first
+loss is identical, and losses diverge from the second step, i.e. after the first
+backward pass. Enabling PyTorch deterministic mode removes the difference.
+
+### Deterministic mode and seed-to-seed variation
+
+`local_eval.py` now runs in deterministic mode by default and accepts `--seed`
+(seeds other than 42 are used only to measure variation, never for selection).
+
+```
+python local_eval.py --workdir runs/003_det_s42 --pretrain-epochs 20 --seed 42
+```
+
+| Run | Seed | Pretrain loss, epoch 20 | Val accuracy | Wall time |
+|---|---|---|---|---|
+| [003_det_s42](runs/003_det_s42/) | 42 | 745.94 | **17.01%** | 26.1 min |
+| [004_det_s42_repeat](runs/004_det_s42_repeat/) | 42 | 745.94 | **17.01%** | 26.5 min |
+| [005_det_s43](runs/005_det_s43/) | 43 | 1317.68 | **9.47%** | 26.1 min |
+| [006_det_s44](runs/006_det_s44/) | 44 | 1422.32 | **9.53%** | 26.2 min |
+
+- Runs 003 and 004 are bit-identical (same losses, accuracy and checkpoint SHA-256):
+  deterministic mode makes the full experiment reproducible at ~4% extra wall time.
+- Across seeds 42/43/44 the baseline gives 12.0% ± 4.3 pp (mean ± sample std, n=3).
+  The gap appears in pretraining (much higher final loss for seeds 43/44), not in the
+  linear probe. Our unverified hypothesis: lr 0.4 without warmup makes early training
+  unstable for some initialisations, and seed 42 is a favourable one.
+- For reference, the binomial standard error of an accuracy near 17% on 3,021
+  validation images is about 0.7 pp.
+
+**Consequence for the loop.** Selection uses seed 42 in deterministic mode, so
+comparisons are exactly reproducible and follow the brief's "strictly exceeds under the
+same conditions" rule. The initial best is `003_det_s42` (17.01%). Because seed-to-seed
+variation (±4.3 pp) is far larger than run-to-run noise, an improvement found at seed 42
+is not evidence that it holds for other seeds; this is the main limitation addressed in
+Part 4.
 
 Timing runs (1 and 2 epochs) are in [runs/000_timing](runs/000_timing/); the first one
 includes the CIFAR-100 download.

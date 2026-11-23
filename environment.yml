@@ -1,0 +1,15 @@
+# Matches the FML-bench `sololearn` env for Representation_Learning_solo_learn.
+# Create:  conda env create -f environment.yml
+name: sololearn
+channels:
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu121
+      - torch==2.1.0+cu121
+      - torchvision==0.16.0+cu121
+      - numpy==1.26.4
+      - pillow==12.1.1
+      - setuptools==80.*

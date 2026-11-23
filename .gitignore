@@ -24,3 +24,7 @@ lightning_logs/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Per-experiment heavy outputs
+model_checkpoint/
+runs/*/data

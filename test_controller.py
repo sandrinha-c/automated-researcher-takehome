@@ -1,5 +1,5 @@
 """Tests for controller.py using the scripted LLM and the fake evaluator.
-No GPU, no API key, nothing written outside a temp folder.
+No GPU, no LLM call, nothing written outside a temp folder.
 
     python -m unittest test_controller -v
 """
@@ -8,6 +8,7 @@ import os
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 import controller as c
 
@@ -54,6 +55,7 @@ class TestAcceptance(LoopCase):
         self.assertEqual(h[1]["status"], "accepted")
         self.assertEqual((h[1]["best_before"], h[1]["best_after"], h[1]["best_id"]),
                          (BASELINE_ACC, 0.185, h[1]["id"]))
+        self.assertEqual(h[1]["llm"], {"model": "scripted-fake"})
         self.assertEqual(self.best(), self.candidate(h[1]))
 
     def test_tie_and_worse_are_rejected(self):
@@ -104,6 +106,23 @@ class TestFailures(LoopCase):
                        self.runs, self.state, 1, 20, log=lambda s: None)
         self.assert_failed(h[1], "invalid_patch")
         self.assertIn("no ```python code block", h[1]["error"])
+
+    def test_llm_failure_is_recorded_and_the_loop_continues(self):
+        good = c.ScriptedLLM([("up", marker("acc=0.1850"))])
+        calls = []
+
+        def flaky(prompt):
+            calls.append(prompt)
+            if len(calls) == 1:
+                raise c.LLMError("claude gave no answer within 600s")
+            return good(prompt)
+
+        h = c.run_loop(OFFICIAL, BASELINE_ACC, "baseline", flaky, c.fake_runner_cmd,
+                       self.runs, self.state, 2, 20, log=lambda s: None)
+        self.assertEqual([r["status"] for r in h[1:]], ["llm_error", "accepted"])
+        self.assertIn("no answer", h[1]["error"])
+        self.assertTrue(os.path.exists(os.path.join(self.runs, h[1]["id"], "prompt.txt")))
+        self.assertNotIn("llm_error", calls[1])  # not the LLM's fault, so not fed back
 
     def test_crash(self):
         h = self.loop([("boom", marker("crash"))])
@@ -162,6 +181,54 @@ class TestBookkeeping(LoopCase):
         os.makedirs(os.path.join(self.runs, "006_det_s44"))
         h = self.loop([("up", marker("acc=0.1850"))])
         self.assertEqual(h[1]["id"], "007_loop")
+
+
+class FakeProc:
+    """Stands in for the `claude` process so ClaudeCLI can be tested without calling it."""
+    returncode = 0
+
+    def __init__(self, stdout=b"", hang=False):
+        self.stdout, self.hang, self.pid = stdout, hang, 0
+
+    def communicate(self, data=None, timeout=None):
+        self.stdin_data = data
+        if self.hang:
+            raise c.subprocess.TimeoutExpired("claude", timeout)
+        return self.stdout, b"some stderr"
+
+
+class TestClaudeCLI(unittest.TestCase):
+    def call(self, proc):
+        cli = c.ClaudeCLI("some-model", "medium")
+        self.addCleanup(os.rmdir, cli.cwd)
+        with mock.patch.object(c.subprocess, "Popen", return_value=proc) as popen, \
+                mock.patch.object(c, "kill_tree") as self.kill:
+            try:
+                return cli, cli("the prompt")
+            finally:
+                self.cmd, self.kwargs = popen.call_args[0][0], popen.call_args[1]
+
+    def test_success_returns_text_and_records_model_and_cost(self):
+        out = {"result": "HYPOTHESIS: x", "is_error": False, "total_cost_usd": 0.12,
+               "modelUsage": {"some-model": {}}}
+        proc = FakeProc(c.json.dumps(out).encode())
+        cli, reply = self.call(proc)
+        self.assertEqual(reply, "HYPOTHESIS: x")
+        self.assertEqual(proc.stdin_data, b"the prompt")
+        self.assertEqual((cli.meta["model"], cli.meta["effort"], cli.meta["cost_usd"]),
+                         ("some-model", "medium", 0.12))
+        self.assertEqual(cli.meta["model_usage"], {"some-model": {}})
+        self.assertEqual(self.cmd[self.cmd.index("--effort") + 1], "medium")
+        self.assertEqual(self.cmd[-2:], ["--tools", ""])        # no tools: text only
+        self.assertEqual(self.cmd[self.cmd.index("--model") + 1], "some-model")
+        self.assertNotEqual(os.path.abspath(self.kwargs["cwd"]), c.ROOT)
+
+    def test_error_output_and_timeout_raise_llm_error(self):
+        for proc in (FakeProc(b"not json"), FakeProc(b'{"result": "limit reached", "is_error": true}'),
+                     FakeProc(hang=True)):
+            with self.assertRaises(c.LLMError):
+                self.call(proc)
+        self.kill.assert_called_once()
 
 
 class TestStatic(unittest.TestCase):

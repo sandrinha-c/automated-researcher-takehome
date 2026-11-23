@@ -14,12 +14,18 @@ how it is scored, or whether it is accepted.
 
 Files written:
     <runs-dir>/NNN_loop/       one directory per candidate: algorithm.py, diff.patch,
-                               prompt.txt, llm_reply.txt, stdout.log, local_eval.json
+                               prompt.txt (the full context sent to the LLM), llm_reply.txt,
+                               stdout.log, local_eval.json
     <state-dir>/baseline/algorithm.py   byte copy of the baseline, never overwritten
     <state-dir>/best/algorithm.py       current best
     <state-dir>/runs.jsonl              append-only log, one JSON object per line
 
-Try it without a GPU or an API key (scripted "LLM" + fake evaluator, in a temp folder):
+The LLM is reached through the Claude Code command line (`claude -p`, already logged in,
+no API key) with every tool switched off, so it can only answer with text.
+
+Real run (one GPU job at a time, about 26 minutes per experiment):
+    python controller.py --max-experiments 2
+Try it without a GPU or the LLM (scripted "LLM" + fake evaluator, in a temp folder):
     python controller.py --fake --max-experiments 7
 """
 import argparse
@@ -62,7 +68,7 @@ def write_text(path, text):
 def build_prompt(best_code, best_acc, history):
     """Everything the LLM gets to see: the rules, past results, and the current best code."""
     lines = []
-    for r in history[-20:]:
+    for r in [r for r in history if r["status"] != "llm_error"][-20:]:
         acc = "-" if r["val_acc"] is None else f"{r['val_acc']:.4f}"
         lines.append(f"- {r['id']} [{r['status']}] val_acc={acc} | {r['hypothesis']}")
         if r["error"]:
@@ -70,6 +76,9 @@ def build_prompt(best_code, best_acc, history):
     return f"""You are improving a self-supervised learning method (Barlow Twins, ResNet-18, CIFAR-100).
 The score is validation accuracy of a linear probe on the frozen backbone. Higher is better.
 A candidate replaces the current best only if its accuracy is strictly greater.
+Every score comes from one training run of 20 pretrain epochs with one fixed seed (42), in
+deterministic mode: the same code always gives the same score, but the baseline varies by
+several points between seeds, so a small gain may not be a real improvement.
 
 Rules:
 - Return the COMPLETE new algorithm.py in one ```python block. Nothing else is editable.
@@ -105,16 +114,73 @@ def parse_reply(reply):
     return hypothesis, code if code.endswith("\n") else code + "\n", None
 
 
+class LLMError(Exception):
+    """The LLM call itself failed (not logged in, rate limit, time limit, bad output)."""
+
+
 def propose(best_code, best_acc, history, llm):
-    """LLM DECISION. `llm` is any function prompt -> reply text (real API or scripted fake)."""
+    """LLM DECISION. `llm` is any callable prompt -> reply text that raises LLMError on
+    failure and describes its last call in `llm.meta` (ClaudeCLI below, or a scripted fake)."""
     prompt = build_prompt(best_code, best_acc, history)
-    reply = llm(prompt)
-    hypothesis, code, error = parse_reply(reply)
-    return {"prompt": prompt, "reply": reply, "hypothesis": hypothesis, "code": code, "error": error}
+    out = {"prompt": prompt, "reply": "", "hypothesis": "", "code": None, "error": None,
+           "status": "invalid_patch"}
+    try:
+        out["reply"] = llm(prompt)
+    except LLMError as e:
+        out.update(status="llm_error", error=str(e))
+    else:
+        out["hypothesis"], out["code"], out["error"] = parse_reply(out["reply"])
+    out["llm"] = dict(getattr(llm, "meta", {}))
+    return out
 
 
-def claude_llm(prompt):
-    raise SystemExit("The Claude API is not connected yet (next issue). Use --fake for now.")
+SYSTEM_PROMPT = ("You are a machine learning researcher. Answer with text only, "
+                 "exactly in the reply format the user asks for.")
+
+
+class ClaudeCLI:
+    """Calls the Claude Code command line in print mode: prompt on stdin, JSON on stdout.
+    All built-in tools, MCP servers and skills are off and the session is not saved; it
+    runs in an empty folder so it cannot see this repository."""
+
+    def __init__(self, model, effort, timeout_s=600):
+        exe = shutil.which("claude")  # on Windows this resolves to claude.cmd
+        if not exe:
+            raise SystemExit("`claude` command not found (npm install -g @anthropic-ai/claude-code)")
+        self.cmd = [exe, "-p", "--model", model, "--effort", effort, "--output-format", "json",
+                    "--no-session-persistence", "--strict-mcp-config", "--disable-slash-commands",
+                    "--system-prompt", SYSTEM_PROMPT, "--tools", ""]
+        self.timeout_s = timeout_s
+        self.cwd = tempfile.mkdtemp(prefix="controller_llm_")
+        self.request = {"model": model, "effort": effort, "system_prompt": SYSTEM_PROMPT}
+        self.meta = dict(self.request)
+
+    def __call__(self, prompt):
+        t0 = time.time()
+        self.meta = dict(self.request)
+        proc = subprocess.Popen(self.cmd, cwd=self.cwd, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                start_new_session=(os.name != "nt"))
+        try:
+            stdout, stderr = proc.communicate(prompt.encode("utf-8"), timeout=self.timeout_s)
+        except subprocess.TimeoutExpired:
+            kill_tree(proc)
+            raise LLMError(f"claude gave no answer within {self.timeout_s:g}s")
+        finally:
+            self.meta["seconds"] = round(time.time() - t0, 1)
+        text = stdout.decode("utf-8", errors="replace")
+        try:
+            data = json.loads(text)
+            reply = data["result"]
+            if data.get("is_error") or not isinstance(reply, str):
+                raise ValueError("claude reported an error")
+        except (ValueError, KeyError, TypeError):
+            detail = (text.strip() or stderr.decode("utf-8", errors="replace").strip())[-500:]
+            raise LLMError(f"claude call failed (exit code {proc.returncode}): {detail}")
+        # model_usage is what the command line reports it actually used (it can list a
+        # second, small model for its own housekeeping next to the requested one).
+        self.meta.update(model_usage=data.get("modelUsage"), cost_usd=data.get("total_cost_usd"))
+        return reply
 
 
 # ------------------------------------------------------------------------ 2. apply_edit
@@ -239,7 +305,7 @@ def next_run_number(runs_dir):
 def run_loop(baseline_path, baseline_acc, baseline_id, llm, runner_cmd, runs_dir, state_dir,
              max_experiments, timeout_s, data_dir=None, log=print):
     """Run until `max_experiments` candidates are in the log (every proposal counts,
-    including invalid ones). Restarting with the same state_dir resumes. Returns the history."""
+    including invalid ones and failed LLM calls). Restarting with the same state_dir resumes. Returns the history."""
     os.makedirs(runs_dir, exist_ok=True)
     log_path = os.path.join(state_dir, "runs.jsonl")
     baseline_copy = os.path.join(state_dir, "baseline", "algorithm.py")
@@ -273,8 +339,9 @@ def run_loop(baseline_path, baseline_acc, baseline_id, llm, runner_cmd, runs_dir
         write_text(os.path.join(run_dir, "prompt.txt"), p["prompt"])
         write_text(os.path.join(run_dir, "llm_reply.txt"), p["reply"])
         entry = {"id": run_id, "time": datetime.datetime.now().isoformat(timespec="seconds"),
-                 "status": "invalid_patch", "hypothesis": p["hypothesis"], "parent": best_id,
-                 "val_acc": None, "best_before": best_acc, "seconds": None, "error": p["error"]}
+                 "status": p["status"], "hypothesis": p["hypothesis"], "parent": best_id,
+                 "val_acc": None, "best_before": best_acc, "seconds": None, "error": p["error"],
+                 "llm": p["llm"]}
 
         if p["code"] is not None:
             apply_edit(p["code"], best_code, best_id, run_dir, data_dir)                 # 2
@@ -342,6 +409,8 @@ class ScriptedLLM:
     """Plays a fixed script, but through the same prompt -> reply text path as a real LLM:
     it reads the best code out of the prompt and answers in the required reply format."""
 
+    meta = {"model": "scripted-fake"}
+
     def __init__(self, script):
         self.script, self.prompts = script, []
 
@@ -358,13 +427,16 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--max-experiments", type=int, default=3,
                     help="total number of candidates in the log (invalid proposals count)")
-    ap.add_argument("--timeout-min", type=float, default=45, help="time limit per experiment")
+    ap.add_argument("--timeout-min", type=float, default=40,
+                    help="time limit per experiment (the baseline takes about 26 min)")
+    ap.add_argument("--model", default="claude-opus-5-5", help="model passed to `claude --model`")
+    ap.add_argument("--effort", default="medium", help="reasoning effort passed to `claude --effort`")
     ap.add_argument("--baseline-dir", default=os.path.join(ROOT, "runs", "003_det_s42"),
                     help="finished baseline run: algorithm.py + local_eval.json")
     ap.add_argument("--runs-dir", default=os.path.join(ROOT, "runs"))
     ap.add_argument("--state-dir", default=os.path.join(ROOT, "loop"))
     ap.add_argument("--fake", action="store_true",
-                    help="scripted LLM + fake evaluator in a temp folder (no GPU, no API key)")
+                    help="scripted LLM + fake evaluator in a temp folder (no GPU, no LLM call)")
     ap.add_argument("--fake-eval", metavar="WORKDIR", help=argparse.SUPPRESS)
     args = ap.parse_args()
     sys.stdout.reconfigure(errors="replace")
@@ -385,7 +457,7 @@ def main():
         baseline_acc = json.loads(read_text(os.path.join(baseline_dir, "local_eval.json")))["val_acc"]
         history = run_loop(
             baseline_path=os.path.join(baseline_dir, "algorithm.py"), baseline_acc=baseline_acc,
-            baseline_id=os.path.basename(baseline_dir), llm=claude_llm, runner_cmd=real_runner_cmd,
+            baseline_id=os.path.basename(baseline_dir), llm=ClaudeCLI(args.model, args.effort), runner_cmd=real_runner_cmd,
             runs_dir=os.path.abspath(args.runs_dir), state_dir=os.path.abspath(args.state_dir),
             max_experiments=args.max_experiments, timeout_s=args.timeout_min * 60,
             data_dir=os.path.join(ROOT, "data"))

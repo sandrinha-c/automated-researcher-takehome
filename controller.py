@@ -1,0 +1,400 @@
+"""Automated-research controller (single file, no framework, standard library only).
+
+One round of the loop:
+
+    1. propose()         LLM decision   read best code + history -> a new algorithm.py
+    2. apply_edit()      fixed rule     write the candidate into its own run directory
+    3. validate()        fixed rule     static checks before any GPU time is spent
+    4. run_experiment()  fixed rule     subprocess -> local_eval.py, with a timeout
+    5. evaluate()        fixed rule     accept only if val_acc is STRICTLY greater than best
+    6. record()          fixed rule     append one line to runs.jsonl (+ diff in the run dir)
+
+The LLM only ever produces the text of algorithm.py. It cannot choose what is run,
+how it is scored, or whether it is accepted.
+
+Files written:
+    <runs-dir>/NNN_loop/       one directory per candidate: algorithm.py, diff.patch,
+                               prompt.txt, llm_reply.txt, stdout.log, local_eval.json
+    <state-dir>/baseline/algorithm.py   byte copy of the baseline, never overwritten
+    <state-dir>/best/algorithm.py       current best
+    <state-dir>/runs.jsonl              append-only log, one JSON object per line
+
+Try it without a GPU or an API key (scripted "LLM" + fake evaluator, in a temp folder):
+    python controller.py --fake --max-experiments 7
+"""
+import argparse
+import ast
+import datetime
+import difflib
+import json
+import math
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+TASK_DIR = os.path.join(ROOT, "task")
+LOCAL_EVAL = os.path.join(ROOT, "local_eval.py")
+PROTECTED_FILES = ("train_eval_baseline.py", "split_config.json")  # copied from task/, never edited
+REQUIRED_SYMBOLS = ("get_model", "get_training_config", "get_augmentation", "BarlowTwinsLoss")
+
+CODE_BLOCK = re.compile(r"```(?:python|py)?[ \t]*\r?\n(.*?)```", re.DOTALL)
+HYPOTHESIS = re.compile(r"^HYPOTHESIS:[ \t]*(.+)$", re.MULTILINE)
+FAKE_MARKER = re.compile(r"^# FAKE_RUN: *(\S+)[ \t]*$", re.MULTILINE)
+
+
+def read_text(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
+def write_text(path, text):
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+# --------------------------------------------------------------------------- 1. propose
+
+def build_prompt(best_code, best_acc, history):
+    """Everything the LLM gets to see: the rules, past results, and the current best code."""
+    lines = []
+    for r in history[-20:]:
+        acc = "-" if r["val_acc"] is None else f"{r['val_acc']:.4f}"
+        lines.append(f"- {r['id']} [{r['status']}] val_acc={acc} | {r['hypothesis']}")
+        if r["error"]:
+            lines.append("    error: " + r["error"].replace("\n", "\n    "))
+    return f"""You are improving a self-supervised learning method (Barlow Twins, ResNet-18, CIFAR-100).
+The score is validation accuracy of a linear probe on the frozen backbone. Higher is better.
+A candidate replaces the current best only if its accuracy is strictly greater.
+
+Rules:
+- Return the COMPLETE new algorithm.py in one ```python block. Nothing else is editable.
+- Keep these top-level names: {", ".join(REQUIRED_SYMBOLS)}.
+- The model must keep .backbone, .projector and .backbone_dim.
+- pretrain_epochs, linear_eval_epochs, batch_size, linear_batch_size and linear_lr are
+  overridden by the evaluator, so changing them has no effect.
+- Do not read or write any other file. One focused change per proposal.
+
+Reply format:
+HYPOTHESIS: <one sentence: what you change and why it should help>
+```python
+<full algorithm.py>
+```
+
+Experiments so far (current best val_acc = {best_acc:.4f}):
+{chr(10).join(lines) or "(none)"}
+
+Current best algorithm.py:
+```python
+{best_code}```
+"""
+
+
+def parse_reply(reply):
+    """-> (hypothesis, code, error). `code` is None when the reply has no usable code block."""
+    m = HYPOTHESIS.search(reply)
+    hypothesis = m.group(1).strip() if m else ""
+    blocks = CODE_BLOCK.findall(reply)
+    if not blocks:
+        return hypothesis, None, "reply contains no ```python code block"
+    code = max(blocks, key=len).replace("\r\n", "\n")
+    return hypothesis, code if code.endswith("\n") else code + "\n", None
+
+
+def propose(best_code, best_acc, history, llm):
+    """LLM DECISION. `llm` is any function prompt -> reply text (real API or scripted fake)."""
+    prompt = build_prompt(best_code, best_acc, history)
+    reply = llm(prompt)
+    hypothesis, code, error = parse_reply(reply)
+    return {"prompt": prompt, "reply": reply, "hypothesis": hypothesis, "code": code, "error": error}
+
+
+def claude_llm(prompt):
+    raise SystemExit("The Claude API is not connected yet (next issue). Use --fake for now.")
+
+
+# ------------------------------------------------------------------------ 2. apply_edit
+
+def apply_edit(code, parent_code, parent_id, run_dir, data_dir):
+    """Write the candidate and a ready-to-run working directory. Returns the diff text."""
+    write_text(os.path.join(run_dir, "algorithm.py"), code)
+    for name in PROTECTED_FILES:  # always fresh copies of the official files
+        shutil.copyfile(os.path.join(TASK_DIR, name), os.path.join(run_dir, name))
+    if data_dir:  # share one CIFAR-100 download between runs
+        link = os.path.join(run_dir, "data")
+        if os.name == "nt":
+            subprocess.run(["cmd", "/c", "mklink", "/J", link, data_dir], check=True,
+                           stdout=subprocess.DEVNULL)
+        else:
+            os.symlink(data_dir, link)
+    diff = "".join(difflib.unified_diff(
+        parent_code.splitlines(keepends=True), code.splitlines(keepends=True),
+        fromfile=f"{parent_id}/algorithm.py", tofile=f"{os.path.basename(run_dir)}/algorithm.py"))
+    write_text(os.path.join(run_dir, "diff.patch"), diff)
+    return diff
+
+
+# -------------------------------------------------------------------------- 3. validate
+
+def validate(code):
+    """Static checks. Returns None if OK, otherwise the reason (fed back to the LLM).
+
+    Skeleton version: syntax + required names. The stricter checks (model attributes,
+    no access to the evaluator / split file) are issue #4 and go here.
+    """
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as e:
+        return f"SyntaxError: {e.msg} (line {e.lineno})"
+    defined = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            defined.add(node.name)
+        elif isinstance(node, ast.Assign):
+            defined.update(t.id for t in node.targets if isinstance(t, ast.Name))
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            defined.update((a.asname or a.name).split(".")[0] for a in node.names)
+    missing = [s for s in REQUIRED_SYMBOLS if s not in defined]
+    if missing:
+        return "missing required top-level names: " + ", ".join(missing)
+    return None
+
+
+# -------------------------------------------------------------------- 4. run_experiment
+
+def kill_tree(proc):
+    """Kill the process and its children (the evaluator starts DataLoader workers)."""
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        import signal
+        os.killpg(proc.pid, signal.SIGKILL)
+    proc.wait()
+
+
+def log_tail(path, n=15):
+    with open(path, encoding="utf-8", errors="replace") as f:
+        return "\n".join(f.read().splitlines()[-n:])
+
+
+def run_experiment(run_dir, cmd, timeout_s):
+    """Run the evaluator as a separate process. -> {status: ok|crash|timeout, val_acc, seconds, error}"""
+    log_path = os.path.join(run_dir, "stdout.log")
+    t0 = time.time()
+    with open(log_path, "wb") as log:
+        proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT, cwd=ROOT,
+                                start_new_session=(os.name != "nt"))
+        try:
+            code = proc.wait(timeout=timeout_s)
+        except subprocess.TimeoutExpired:
+            kill_tree(proc)
+            code = None
+    out = {"status": "crash", "val_acc": None, "seconds": round(time.time() - t0, 1), "error": None}
+    if code is None:
+        out.update(status="timeout", error=f"killed after the {timeout_s:g}s time limit")
+    elif code != 0:
+        out["error"] = f"exit code {code}\n{log_tail(log_path)}"
+    else:
+        try:
+            acc = json.loads(read_text(os.path.join(run_dir, "local_eval.json")))["val_acc"]
+            if not (isinstance(acc, float) and math.isfinite(acc) and 0.0 <= acc <= 1.0):
+                raise ValueError(f"val_acc is not a valid accuracy: {acc!r}")
+            out.update(status="ok", val_acc=acc)
+        except (OSError, ValueError, KeyError) as e:
+            out["error"] = f"no usable result: {e}"
+    return out
+
+
+# -------------------------------------------------------------------------- 5. evaluate
+
+def evaluate(val_acc, best_acc):
+    """Acceptance rule: strictly greater. A tie keeps the old best."""
+    return val_acc > best_acc
+
+
+# ---------------------------------------------------------------------------- 6. record
+
+def record(log_path, entry):
+    with open(log_path, "a", encoding="utf-8", newline="\n") as f:
+        f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+
+
+def load_history(log_path):
+    with open(log_path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+# ------------------------------------------------------------------------------- loop
+
+def next_run_number(runs_dir):
+    nums = [int(n[:3]) for n in os.listdir(runs_dir) if re.match(r"\d{3}_", n)]
+    return max(nums, default=-1) + 1
+
+
+def run_loop(baseline_path, baseline_acc, baseline_id, llm, runner_cmd, runs_dir, state_dir,
+             max_experiments, timeout_s, data_dir=None, log=print):
+    """Run until `max_experiments` candidates are in the log (every proposal counts,
+    including invalid ones). Restarting with the same state_dir resumes. Returns the history."""
+    os.makedirs(runs_dir, exist_ok=True)
+    log_path = os.path.join(state_dir, "runs.jsonl")
+    baseline_copy = os.path.join(state_dir, "baseline", "algorithm.py")
+    best_path = os.path.join(state_dir, "best", "algorithm.py")
+
+    if not os.path.exists(log_path):  # first start: the baseline is the initial best
+        os.makedirs(os.path.dirname(baseline_copy))
+        os.makedirs(os.path.dirname(best_path))
+        shutil.copyfile(baseline_path, baseline_copy)
+        shutil.copyfile(baseline_path, best_path)
+        record(log_path, {
+            "id": baseline_id, "time": datetime.datetime.now().isoformat(timespec="seconds"),
+            "status": "baseline", "hypothesis": "unmodified baseline", "parent": None,
+            "val_acc": baseline_acc, "best_before": None, "best_after": baseline_acc,
+            "best_id": baseline_id, "seconds": None, "error": None})
+
+    history = load_history(log_path)
+    best_id, best_acc = history[-1]["best_id"], history[-1]["best_after"]
+    # The log is the source of truth: rebuild best/ from the run that the log says is best.
+    best_src = baseline_copy if best_id == history[0]["id"] else os.path.join(runs_dir, best_id, "algorithm.py")
+    best_code = read_text(best_src)
+    write_text(best_path, best_code)
+
+    while len(history) - 1 < max_experiments:
+        run_id = f"{next_run_number(runs_dir):03d}_loop"
+        run_dir = os.path.join(runs_dir, run_id)
+        os.makedirs(run_dir)
+        log(f"[{run_id}] proposing (best = {best_id}, {best_acc:.4f})")
+
+        p = propose(best_code, best_acc, history, llm)                                   # 1
+        write_text(os.path.join(run_dir, "prompt.txt"), p["prompt"])
+        write_text(os.path.join(run_dir, "llm_reply.txt"), p["reply"])
+        entry = {"id": run_id, "time": datetime.datetime.now().isoformat(timespec="seconds"),
+                 "status": "invalid_patch", "hypothesis": p["hypothesis"], "parent": best_id,
+                 "val_acc": None, "best_before": best_acc, "seconds": None, "error": p["error"]}
+
+        if p["code"] is not None:
+            apply_edit(p["code"], best_code, best_id, run_dir, data_dir)                 # 2
+            entry["error"] = validate(p["code"])                                         # 3
+        if entry["error"] is None:
+            result = run_experiment(run_dir, runner_cmd(run_dir), timeout_s)             # 4
+            entry.update(result)
+            if result["status"] == "ok":
+                accepted = evaluate(result["val_acc"], best_acc)                         # 5
+                entry["status"] = "accepted" if accepted else "rejected"
+                if accepted:
+                    best_id, best_acc, best_code = run_id, result["val_acc"], p["code"]
+                    write_text(best_path, best_code)
+
+        entry.update(best_after=best_acc, best_id=best_id)
+        record(log_path, entry)                                                          # 6
+        history.append(entry)
+        acc = "" if entry["val_acc"] is None else f" val_acc={entry['val_acc']:.4f}"
+        log(f"[{run_id}] {entry['status']}{acc}" +
+            (f" | {entry['error'].splitlines()[-1]}" if entry["error"] else ""))
+    return history
+
+
+# ------------------------------------------------- fake LLM + fake evaluator (no GPU/key)
+
+def fake_eval(workdir):
+    """Stands in for local_eval.py. Obeys a '# FAKE_RUN: ...' line in algorithm.py:
+    acc=0.185 -> report that accuracy, crash -> raise, sleep=30 -> hang for 30 s."""
+    m = FAKE_MARKER.search(read_text(os.path.join(workdir, "algorithm.py")))
+    action = m.group(1) if m else "acc=0.17"
+    if action == "crash":
+        raise RuntimeError("fake crash: CUDA out of memory")
+    if action.startswith("sleep="):
+        time.sleep(float(action[6:]))
+        action = "acc=0.17"
+    with open(os.path.join(workdir, "local_eval.json"), "w") as f:
+        json.dump({"val_acc": float(action[4:]), "fake": True}, f)
+
+
+def fake_runner_cmd(run_dir):
+    return [sys.executable, os.path.abspath(__file__), "--fake-eval", run_dir]
+
+
+def real_runner_cmd(run_dir):
+    return [sys.executable, LOCAL_EVAL, "--workdir", run_dir]
+
+
+def with_marker(code, action):
+    return f"# FAKE_RUN: {action}\n" + FAKE_MARKER.sub("", code).lstrip("\n")
+
+
+# (hypothesis, function best_code -> candidate code). Baseline accuracy in fake mode is 0.1701.
+FAKE_SCRIPT = [
+    ("fake: better result", lambda c: with_marker(c, "acc=0.1850")),             # accepted
+    ("fake: syntax error", lambda c: c + "\ndef broken(:\n"),                    # invalid_patch
+    ("fake: crashes", lambda c: with_marker(c, "crash")),                        # crash
+    ("fake: hangs", lambda c: with_marker(c, "sleep=60")),                       # timeout
+    ("fake: worse result", lambda c: with_marker(c, "acc=0.1600")),              # rejected
+    ("fake: ties the best", lambda c: with_marker(c, "acc=0.1850")),             # rejected (tie)
+    ("fake: better again", lambda c: with_marker(c, "acc=0.1900")),              # accepted
+]
+
+
+class ScriptedLLM:
+    """Plays a fixed script, but through the same prompt -> reply text path as a real LLM:
+    it reads the best code out of the prompt and answers in the required reply format."""
+
+    def __init__(self, script):
+        self.script, self.prompts = script, []
+
+    def __call__(self, prompt):
+        hypothesis, edit = self.script[len(self.prompts) % len(self.script)]
+        self.prompts.append(prompt)
+        best_code = CODE_BLOCK.findall(prompt)[-1]
+        return f"HYPOTHESIS: {hypothesis}\n```python\n{edit(best_code)}```\n"
+
+
+# ------------------------------------------------------------------------------- main
+
+def main():
+    ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    ap.add_argument("--max-experiments", type=int, default=3,
+                    help="total number of candidates in the log (invalid proposals count)")
+    ap.add_argument("--timeout-min", type=float, default=45, help="time limit per experiment")
+    ap.add_argument("--baseline-dir", default=os.path.join(ROOT, "runs", "003_det_s42"),
+                    help="finished baseline run: algorithm.py + local_eval.json")
+    ap.add_argument("--runs-dir", default=os.path.join(ROOT, "runs"))
+    ap.add_argument("--state-dir", default=os.path.join(ROOT, "loop"))
+    ap.add_argument("--fake", action="store_true",
+                    help="scripted LLM + fake evaluator in a temp folder (no GPU, no API key)")
+    ap.add_argument("--fake-eval", metavar="WORKDIR", help=argparse.SUPPRESS)
+    args = ap.parse_args()
+    sys.stdout.reconfigure(errors="replace")
+
+    if args.fake_eval:
+        return fake_eval(args.fake_eval)
+
+    if args.fake:
+        tmp = tempfile.mkdtemp(prefix="controller_fake_")
+        history = run_loop(
+            baseline_path=os.path.join(TASK_DIR, "algorithm.py"), baseline_acc=0.1701,
+            baseline_id="baseline", llm=ScriptedLLM(FAKE_SCRIPT), runner_cmd=fake_runner_cmd,
+            runs_dir=os.path.join(tmp, "runs"), state_dir=os.path.join(tmp, "loop"),
+            max_experiments=args.max_experiments, timeout_s=3)
+        print(f"output: {tmp}")
+    else:
+        baseline_dir = os.path.abspath(args.baseline_dir)
+        baseline_acc = json.loads(read_text(os.path.join(baseline_dir, "local_eval.json")))["val_acc"]
+        history = run_loop(
+            baseline_path=os.path.join(baseline_dir, "algorithm.py"), baseline_acc=baseline_acc,
+            baseline_id=os.path.basename(baseline_dir), llm=claude_llm, runner_cmd=real_runner_cmd,
+            runs_dir=os.path.abspath(args.runs_dir), state_dir=os.path.abspath(args.state_dir),
+            max_experiments=args.max_experiments, timeout_s=args.timeout_min * 60,
+            data_dir=os.path.join(ROOT, "data"))
+
+    print("\nid            status         val_acc  best")
+    for r in history:
+        acc = "   -   " if r["val_acc"] is None else f"{r['val_acc']:.4f} "
+        print(f"{r['id']:<13} {r['status']:<14} {acc}  {r['best_after']:.4f}")
+
+
+if __name__ == "__main__":
+    main()

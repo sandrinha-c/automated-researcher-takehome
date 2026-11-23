@@ -1,2 +1,3 @@
 # Keep the official FML-bench files byte-identical (local_eval.py checks their SHA-256).
 task/** -text
+runs/** -text

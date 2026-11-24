@@ -3,7 +3,7 @@
 A minimal autonomous research loop (Propose → Modify → Execute → Evaluate → Record → Repeat)
 on the FML-bench task `Representation_Learning_solo_learn` (Barlow Twins on CIFAR-100).
 
-Work in progress: the controller, loop logs, diffs and visualization will be added here.
+Work in progress: the visualization, Part 4 and the disclosure section will be added here.
 
 ## Environment
 
@@ -139,3 +139,75 @@ includes the CIFAR-100 download.
 
 Note: `001_baseline` ran with CRLF copies of the task files (a Windows checkout artifact,
 fixed before `002`); Python executes them identically.
+
+## Part 2 — the research loop
+
+[controller.py](controller.py) runs the loop: propose → apply edit → validate → run →
+evaluate → record. The LLM only writes the text of a new `algorithm.py`; what is run, how
+it is scored and whether it is accepted are fixed rules in the controller.
+
+```
+python controller.py --max-experiments 3
+```
+
+This starts from `runs/003_det_s42` as the initial best and uses the same evaluator
+command as Part 1 for every candidate (20 pretrain epochs, seed 42, deterministic mode).
+One experiment takes about 26 minutes on this GPU. Restarting the command with the same
+`loop/` folder resumes from the log.
+
+### Result of the real run (2026-11-24)
+
+| Run | Parent | Change proposed by the LLM | Val accuracy | Decision | Diff |
+|---|---|---|---|---|---|
+| [003_det_s42](runs/003_det_s42/) | — | unmodified baseline | 17.01% | initial best | — |
+| [007_loop](runs/007_loop/) | 003 | remove `GaussianBlur` from the augmentation | **18.40%** | accepted | [diff](runs/007_loop/diff.patch) |
+| [008_loop](runs/008_loop/) | 007 | raise the minimum crop scale 0.2 → 0.35 | 16.09% | rejected | [diff](runs/008_loop/diff.patch) |
+| [009_loop](runs/009_loop/) | 007 | multiply the loss by 0.1 | **20.03%** | accepted | [diff](runs/009_loop/diff.patch) |
+
+- The best moved from 17.01% to 20.03% in three experiments (77 minutes of GPU time,
+  0.24 USD of LLM usage as reported by the command line).
+- 008 was rejected, so 009 was proposed from 007 again, with the failed attempt and its
+  score in the prompt. This is the "use the feedback for the next proposal" step.
+- All three scores come from seed 42 only. The baseline alone varies by ±4.3 pp across
+  seeds, so these gains are not yet shown to hold for other seeds (see Part 4).
+
+Where to look:
+
+| File | Content |
+|---|---|
+| [loop/runs.jsonl](loop/runs.jsonl) | one line per experiment: hypothesis, status, score, best before/after, model, token usage |
+| `runs/NNN_loop/prompt.txt`, `llm_reply.txt` | the full prompt sent to the LLM and its unedited reply |
+| `runs/NNN_loop/diff.patch`, `algorithm.py` | the change against its parent, and the candidate file |
+| `runs/NNN_loop/stdout.log`, `local_eval.json` | evaluator output and score |
+| [loop/baseline/](loop/baseline/), [loop/best/](loop/best/) | the untouched baseline and the current best `algorithm.py` |
+
+### Reproducing
+
+- **Without a GPU or an LLM:** `python controller.py --fake --max-experiments 7` plays a
+  scripted "LLM" against a fake evaluator in a temporary folder and exercises every
+  outcome (accepted, rejected, tie, invalid patch, crash, timeout).
+  `python -m unittest test_controller -v` runs the unit tests (also no GPU, no LLM call).
+- **Real run:** the LLM is called through the Claude Code command line, not through an
+  API key. Install it (`npm install -g @anthropic-ai/claude-code`), run `claude` once and
+  log in, then run the command above. Defaults: `--model claude-opus-5-5 --effort medium`
+  (run made with Claude Code 2.1.330). LLM output is not deterministic, so a new run will
+  produce different proposals; the experiments themselves are reproducible from the
+  saved `algorithm.py` files.
+
+### What the LLM sees
+
+Each call is `claude -p` with all tools, MCP servers and slash commands switched off, a
+one-line system prompt that replaces the default one, no saved session, and an empty
+temporary folder as working directory. The intended context is therefore the system
+prompt plus `prompt.txt`. Checked on 2026-11-25:
+
+- No user-level `CLAUDE.md` exists on this machine, and the empty working folder has no
+  project instructions. Claude Code's memory is stored per working folder, and no memory
+  folder exists for the temporary folders the controller used.
+- The command line still adds a short block of its own that is not in `prompt.txt`:
+  operating system, working folder, date, model name, and a note with the account email.
+  A test call with the same flags showed this block; it contains nothing about this
+  project or earlier results.
+- Not verified: whether a `CLAUDE.md` would be ignored if one existed. A test with a
+  marker file was inconclusive, so on another machine check that `~/.claude/CLAUDE.md`
+  is absent before a real run.

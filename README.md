@@ -3,7 +3,13 @@
 A minimal autonomous research loop (Propose → Modify → Execute → Evaluate → Record → Repeat)
 on the FML-bench task `Representation_Learning_solo_learn` (Barlow Twins on CIFAR-100).
 
-Work in progress: the visualization, Part 4 and the disclosure section will be added here.
+| Part | Where |
+|---|---|
+| 1 — baseline, noise and seed study | [below](#part-1--baseline) |
+| 2 — the loop and its real run | [below](#part-2--the-research-loop), [controller.py](controller.py), [loop/runs.jsonl](loop/runs.jsonl) |
+| 2A / 3 — architecture diagram and timeline of the real run | [docs/figures.md](docs/figures.md) |
+| 4 — main limitation and one controlled improvement | [docs/part4.md](docs/part4.md) |
+| Disclosure — LLM use, packages, human intervention, failures, reused code | [below](#disclosure) |
 
 ## Environment
 
@@ -146,6 +152,11 @@ fixed before `002`); Python executes them identically.
 evaluate → record. The LLM only writes the text of a new `algorithm.py`; what is run, how
 it is scored and whether it is accepted are fixed rules in the controller.
 
+![Architecture of the research loop](docs/architecture.svg)
+
+The step-by-step table (function per step, LLM decision or fixed rule) is in
+[docs/figures.md](docs/figures.md).
+
 ```
 python controller.py --max-experiments 3
 ```
@@ -171,6 +182,12 @@ One experiment takes about 26 minutes on this GPU. Restarting the command with t
 - All three scores come from seed 42 only. The baseline alone varies by ±4.3 pp across
   seeds, so these gains are not yet shown to hold for other seeds (see Part 4).
 
+![Timeline of the real loop run](docs/timeline.svg)
+
+The timeline is generated from the log by [tools/make_figures.py](tools/make_figures.py);
+[docs/figures.md](docs/figures.md) walks through the rejected run 008 and what the loop
+did next.
+
 Where to look:
 
 | File | Content |
@@ -190,7 +207,8 @@ Where to look:
 - **Real run:** the LLM is called through the Claude Code command line, not through an
   API key. Install it (`npm install -g @anthropic-ai/claude-code`), run `claude` once and
   log in, then run the command above. Defaults: `--model claude-opus-5-5 --effort medium`
-  (run made with Claude Code 2.1.330). LLM output is not deterministic, so a new run will
+  (the command line reported version 2.1.330 on 2026-11-25; the version at the time of
+  the run was not recorded). LLM output is not deterministic, so a new run will
   produce different proposals; the experiments themselves are reproducible from the
   saved `algorithm.py` files.
 
@@ -211,3 +229,97 @@ prompt plus `prompt.txt`. Checked on 2026-11-25:
 - Not verified: whether a `CLAUDE.md` would be ignored if one existed. A test with a
   marker file was inconclusive, so on another machine check that `~/.claude/CLAUDE.md`
   is absent before a real run.
+
+## Part 4 — main limitation and one controlled improvement
+
+Selection uses a single seed. The two accepted changes gained +1.4 and +1.6 points at
+seed 42, while the unmodified baseline varies by ±4.3 points across seeds 42/43/44, so
+the loop cannot tell a real improvement from a change that happens to suit seed 42.
+The proposed improvement is multi-seed acceptance, compared against the current rule at
+equal GPU budget and judged on seeds that neither loop used. One-slide version:
+[docs/part4.md](docs/part4.md). It is a proposal; nothing in it has been run.
+
+## Disclosure
+
+### LLM and coding assistant
+
+- **Inside the loop:** `claude-opus-5-5` at `medium` effort, called through the Claude
+  Code command line (`claude -p`, existing Claude Code login, no API key). Model, effort, system
+  prompt, token usage and cost of every call are in [loop/runs.jsonl](loop/runs.jsonl).
+  The usage records also list a few dozen output tokens of `claude-haiku-5-5` per call,
+  which the command line uses on its own.
+- **Writing this repository:** Claude Code was used as coding assistant throughout.
+  Every commit carries a `Co-Authored-By` trailer naming the model (Claude Opus 5.5 or
+  Claude Fable 5.2). This covers the code, the tests, the figures and this README.
+
+### Packages
+
+- Experiments: Python 3.10, torch 2.1.0+cu121, torchvision 0.16.0+cu121, numpy 1.26.4,
+  pillow 12.1.1 ([environment.yml](environment.yml), matching the FML-bench environment
+  for this task).
+- [controller.py](controller.py), [test_controller.py](test_controller.py) and
+  [tools/make_figures.py](tools/make_figures.py) use the Python standard library only.
+  The PNG copies of the figures are rendered with headless Edge or Chrome.
+- External tools: the Claude Code command line (LLM calls) and git.
+
+### Reused code and own code
+
+| | Files | Origin |
+|---|---|---|
+| Reused, unmodified | [task/](task/) (`algorithm.py`, `train_eval_baseline.py`, `split_config.json`, configs, reference results) | FML-bench, Apache-2.0, commit `d336651` ([task/SOURCE.md](task/SOURCE.md)); only `SOURCE.md` was added |
+| Written for this project | `local_eval.py`, `controller.py`, `test_controller.py`, `tools/`, `docs/`, this README | written with Claude Code (see above) |
+| Written by the loop's LLM | `runs/007_loop`–`009_loop/algorithm.py` | each file is identical to the code block in that run's `llm_reply.txt` |
+
+Two of the LLM's proposals are not new ideas: its own hypotheses cite solo-learn's CIFAR
+recipe for Barlow Twins as the source of removing blur (007) and of the 0.1 loss scale
+(009). No solo-learn code is in this repository.
+
+### Human intervention
+
+Fixed in code before the loop ran, outside the loop (none of this is decided by the loop's LLM):
+
+- the reduced budget (20 pretrain epochs instead of 130), deterministic mode, seed 42
+  for selection, and `runs/003_det_s42` as the initial best;
+- which config keys the evaluator overrides (`pretrain_epochs`, `linear_eval_epochs`,
+  `batch_size`, `linear_batch_size`, `linear_lr`);
+- the prompt text, the rules in `validate()`, the acceptance rule, the 40-minute time
+  limit, and the limit of three experiments;
+- the model and effort level.
+
+During the real run: the proposals, hypotheses and code of 007–009 are the LLM's
+unedited output, and accept/reject was decided by `evaluate()`. The log
+([loop/controller_stdout.log](loop/controller_stdout.log)) shows the three experiments
+running back to back in one invocation.
+
+After the run: the figures, the choice of run 008 as the worked example, and all
+interpretation in this README and in `docs/` were made outside the loop, with the coding
+assistant.
+
+### Failures and pitfalls
+
+- **Identical runs gave different scores.** The first two baselines (001, 002) differ
+  by 1.29 points with the same code and seed. Cause: non-deterministic GPU arithmetic
+  ([tools/determinism_check.py](tools/determinism_check.py)). Fix: deterministic mode by
+  default. Runs 001 and 002 are therefore not comparable with the loop runs.
+- **The baseline is fragile across seeds.** Seeds 43 and 44 reach only about 9.5%
+  against 17.0% for seed 42. The cause is not established; the lr/warmup explanation in
+  Part 1 is a hypothesis.
+- **Line endings changed the official files.** A Windows checkout converted the task
+  files to CRLF, which changes their hash; `001_baseline` ran with such copies. Fixed
+  with [.gitattributes](.gitattributes) before `002`.
+- **A candidate could have changed the evaluation protocol.** `linear_lr` is returned by
+  the candidate's `get_training_config()`. It is now overridden by `local_eval.py`
+  together with the budget keys.
+- **Rejected proposal.** 008 (milder crops) scored 16.09%, below both the best and the
+  baseline.
+- **Error handling was not exercised by the real run.** No invalid patch, crash, timeout
+  or LLM error occurred in the three real experiments; those paths are covered only by
+  the fake runner and the unit tests.
+- **`validate()` is not a sandbox.** It is a static filter; the integrity of the
+  evaluator and split file is enforced separately by hash checks.
+- **The LLM context is not fully controlled.** The command line adds an environment
+  block that is not saved in `prompt.txt`, and the test of whether a user-level
+  `CLAUDE.md` would be ignored was inconclusive (see "What the LLM sees").
+- **Not done:** the official 130-epoch budget was never run locally (about 2.7 h per
+  experiment); the 47.77% reference is the number shipped with FML-bench. The accepted
+  changes have not been checked on other seeds or on the hidden test split.

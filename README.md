@@ -46,6 +46,43 @@ for selection. Unlike FML-bench, the LLM is not allowed to edit `split_config.js
 
 ## Part 1 — baseline
 
+### What the baseline does
+
+**Barlow Twins (pretraining, no labels).** Every training image is randomly augmented
+twice (crop, flip, colour jitter, grayscale, blur), giving two views of the same image.
+Both views go through the same network: a ResNet-18 backbone (512-d features) followed
+by a 3-layer projector (2048-d embeddings). Over a batch, the loss builds the
+2048 × 2048 cross-correlation matrix between the embeddings of view 1 and view 2 and
+pushes it towards the identity matrix:
+
+- diagonal → 1: each embedding dimension gives the same answer for both views, so the
+  representation ignores the augmentations and keeps what the image is about;
+- off-diagonal → 0 (weighted by `lambda_param = 5e-3`): different dimensions carry
+  different information, which prevents the trivial solution where every image gets
+  the same output.
+
+Unlike contrastive methods, it needs no negative pairs and no momentum encoder.
+The code is in [task/algorithm.py](task/algorithm.py) (`BarlowTwinsLoss`, `BarlowTwinsModel`).
+
+**Linear evaluation (the score).** Pretraining has no accuracy of its own, so the
+quality of the representation is measured afterwards. The projector is discarded and the
+backbone is frozen. A single linear layer (512 → 100 classes) is trained on the frozen
+features with the training labels (SGD, lr 0.1, 100 epochs), and its accuracy on the
+3,021 validation images is the reported number. A linear layer cannot learn new features,
+so a higher accuracy means the backbone itself has organised the images better. This
+protocol lives in the official evaluator (`linear_eval()` in `task/train_eval_baseline.py`)
+and is the same for every experiment.
+
+**One possible modification.** Lower the pretraining learning rate (`lr` 0.4 → 0.2 in
+`get_training_config()`). Reason: the evaluator uses plain SGD with a cosine schedule and
+no warmup, and the seed study below shows that two of three seeds end pretraining with
+almost twice the loss of the third, which suggests unstable early training. A smaller
+step size is the simplest change that targets this, it costs no extra compute, and it is
+a one-line edit inside the file the loop is allowed to change. It is a hypothesis to
+test, not a result.
+
+### Baseline runs
+
 ```
 python local_eval.py --workdir runs/001_baseline --pretrain-epochs 20
 ```

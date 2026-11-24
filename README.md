@@ -248,9 +248,14 @@ equal GPU budget and judged on seeds that neither loop used. One-slide version:
   prompt, token usage and cost of every call are in [loop/runs.jsonl](loop/runs.jsonl).
   The usage records also list a few dozen output tokens of `claude-haiku-5-5` per call,
   which the command line uses on its own.
-- **Writing this repository:** Claude Code was used as coding assistant throughout.
-  Every commit carries a `Co-Authored-By` trailer naming the model (Claude Opus 5.5 or
-  Claude Fable 5.2). This covers the code, the tests, the figures and this README.
+- **Writing this repository:** Claude Code was the coding assistant throughout, and the
+  only AI tool used. Every commit carries a `Co-Authored-By` trailer naming the model
+  (Claude Opus 5.5 or Claude Fable 5.2). This covers the code, the tests, the figures and
+  this README.
+- **My role:** the code was written by the assistant, not typed by hand. I set the goals
+  and constraints, read and reviewed what it produced, and decided what to keep. The work
+  was split over several assistant sessions, tracked with the plan in
+  [docs/plan.md](docs/plan.md) and the repository's issues.
 
 ### Packages
 
@@ -276,7 +281,9 @@ recipe for Barlow Twins as the source of removing blur (007) and of the 0.1 loss
 
 ### Human intervention
 
-Fixed in code before the loop ran, outside the loop (none of this is decided by the loop's LLM):
+Before the loop ran, the following were fixed in code. None of this is decided by the
+loop's LLM. These design choices were proposed by the coding assistant and reviewed and
+approved by me:
 
 - the reduced budget (20 pretrain epochs instead of 130), deterministic mode, seed 42
   for selection, and `runs/003_det_s42` as the initial best;
@@ -284,10 +291,18 @@ Fixed in code before the loop ran, outside the loop (none of this is decided by 
   `batch_size`, `linear_batch_size`, `linear_lr`);
 - the prompt text, the rules in `validate()`, the acceptance rule, the 40-minute time
   limit, and the limit of three experiments;
-- the model and effort level.
+- calling the LLM through the Claude Code command line instead of an API key.
 
-During the real run: the proposals, hypotheses and code of 007–009 are the LLM's
-unedited output, and accept/reject was decided by `evaluate()`. The log
+Decisions I made myself:
+
+- the loop's model and effort level (`claude-opus-5-5`, `medium`), instead of the more
+  expensive model the assistant suggested;
+- having the plan checked line by line against the exam brief before it was adopted;
+- when to start the real run.
+
+During the real run there was no human intervention: no restart, no interruption and no
+manual edit. The proposals, hypotheses and code of 007–009 are the LLM's unedited
+output, and accept/reject was decided by `evaluate()`. The log
 ([loop/controller_stdout.log](loop/controller_stdout.log)) shows the three experiments
 running back to back in one invocation.
 

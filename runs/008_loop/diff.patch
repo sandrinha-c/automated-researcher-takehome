@@ -1,0 +1,30 @@
+--- 007_loop/algorithm.py
++++ 008_loop/algorithm.py
+@@ -5,8 +5,10 @@
+ embedding dimensions via a cross-correlation loss. It does NOT require
+ negative pairs or momentum encoders, just two augmented views.
+ 
+-Change vs. baseline: GaussianBlur removed from the augmentation pipeline,
+-since it is harmful at 32x32 resolution.
++Changes vs. baseline:
++- GaussianBlur removed from the augmentation pipeline, since it is harmful at 32x32 resolution.
++- RandomResizedCrop minimum scale raised from 0.2 to 0.35 so that the two views stay
++  semantically consistent, which suits the short pretraining schedule.
+ """
+ import torch
+ import torch.nn as nn
+@@ -96,12 +98,12 @@
+ 
+ 
+ def get_augmentation():
+-    """Return augmentation transforms for Barlow Twins (no blur for 32x32 images)."""
++    """Return augmentation transforms for Barlow Twins (no blur, milder crops for 32x32 images)."""
+     mean = (0.5071, 0.4867, 0.4408)
+     std = (0.2675, 0.2565, 0.2761)
+ 
+     return transforms.Compose([
+-        transforms.RandomResizedCrop(32, scale=(0.2, 1.0)),
++        transforms.RandomResizedCrop(32, scale=(0.35, 1.0)),
+         transforms.RandomHorizontalFlip(),
+         transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+         transforms.RandomGrayscale(p=0.2),

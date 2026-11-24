@@ -1,0 +1,12 @@
+[007_loop] proposing (best = 003_det_s42, 0.1701)
+[007_loop] accepted val_acc=0.1840
+[008_loop] proposing (best = 007_loop, 0.1840)
+[008_loop] rejected val_acc=0.1609
+[009_loop] proposing (best = 007_loop, 0.1840)
+[009_loop] accepted val_acc=0.2003
+
+id            status         val_acc  best
+003_det_s42   baseline       0.1701   0.1701
+007_loop      accepted       0.1840   0.1840
+008_loop      rejected       0.1609   0.1840
+009_loop      accepted       0.2003   0.2003

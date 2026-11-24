@@ -10,6 +10,7 @@ on the FML-bench task `Representation_Learning_solo_learn` (Barlow Twins on CIFA
 | 2A / 3 — architecture diagram and timeline of the real run | [docs/figures.md](docs/figures.md) |
 | 4 — main limitation and one controlled improvement | [docs/part4.md](docs/part4.md) |
 | Disclosure — LLM use, packages, human intervention, failures, reused code | [below](#disclosure) |
+| Slides (English and Chinese) | [slides/](slides/), built by [slides/make_slides.js](slides/make_slides.js) |
 
 ## Environment
 

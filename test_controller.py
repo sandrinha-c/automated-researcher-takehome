@@ -100,6 +100,10 @@ class TestFailures(LoopCase):
         self.assert_failed(h[1], "invalid_patch")
         self.assertIn("get_augmentation", h[1]["error"])
 
+    def test_invalid_patch_reason_reaches_the_next_proposal(self):
+        self.loop([("bad", lambda code: code + "\nimport os\n"), ("up", marker("acc=0.1850"))])
+        self.assertIn("import of 'os' is not allowed", self.llm.prompts[1])
+
     def test_invalid_patch_reply_without_code(self):
         self.llm = lambda prompt: "HYPOTHESIS: I forgot the code"
         h = c.run_loop(OFFICIAL, BASELINE_ACC, "baseline", self.llm, c.fake_runner_cmd,
@@ -231,9 +235,106 @@ class TestClaudeCLI(unittest.TestCase):
         self.kill.assert_called_once()
 
 
-class TestStatic(unittest.TestCase):
+class TestValidate(unittest.TestCase):
+    def setUp(self):
+        self.official = c.read_text(OFFICIAL)
+
+    def rejected(self, code, expect):
+        reason = c.validate(code)
+        self.assertIsNotNone(reason, "should have been rejected")
+        self.assertIn(expect, reason)
+
     def test_official_algorithm_is_valid(self):
-        self.assertIsNone(c.validate(c.read_text(OFFICIAL)))
+        self.assertIsNone(c.validate(self.official))
+
+    def test_syntax_error(self):
+        self.rejected(self.official + "\ndef broken(:\n", "SyntaxError")
+
+    def test_each_required_name_is_checked(self):
+        for name in c.REQUIRED_SYMBOLS:
+            self.rejected(self.official.replace(name, name + "_x"), name)
+
+    def test_alias_counts_as_defined(self):
+        code = self.official.replace("class BarlowTwinsLoss", "class MyLoss") + "\nBarlowTwinsLoss = MyLoss\n"
+        self.assertIsNone(c.validate(code))
+
+    def test_each_required_model_attribute_is_checked(self):
+        for attr in c.REQUIRED_MODEL_ATTRS:
+            self.assertIn(f"self.{attr} =", self.official)
+            self.rejected(self.official.replace(f"self.{attr} =", f"self.{attr}_x ="), f"self.{attr}")
+
+    def test_evaluator_and_split_are_off_limits(self):
+        for line, expect in [
+            ("import os", "import of 'os'"),
+            ("import json, sys", "import of 'json'"),
+            ("from pathlib import Path", "import of 'pathlib'"),
+            ("from . import train_eval_baseline", "relative import"),
+            ("f = open('split_config.json', 'w')", "'open'"),
+            ("NAME = 'split_' + 'config.json'; x = __builtins__", "__builtins__"),
+            ("NAME = 'split_config.json'", "split_config"),
+            ("NAME = 'train_eval_baseline.py'", "train_eval_baseline"),
+            ("exec('import os')", "'exec'"),
+            ("m = __import__('os')", "'__import__'"),
+            ("x = torch.__dict__", "__dict__"),
+            ("x = ().__class__.__bases__", "__bases__"),
+            ("torch.save({}, 'x.pt')", "writes a file"),
+            ("w = torch.load('model_checkpoint/backbone.pt')", "reads a file"),
+            ("from torch import load", "reads a file"),
+            ("np.save('x.npy', 0)", "writes a file"),
+        ]:
+            with self.subTest(line=line):
+                self.rejected(self.official + "\n" + line + "\n", expect)
+
+    def test_labels_downloads_and_seeds_are_off_limits(self):
+        for line, expect in [
+            ("d = torchvision.datasets.CIFAR100('./data', train=False)", "loads a dataset"),
+            ("from torchvision import datasets", "loads a dataset"),
+            ("import torchvision.datasets as D", "loads a dataset"),
+            ("m = torch.hub.load('pytorch/vision', 'resnet18')", "downloads"),
+            ("torch.manual_seed(0)", "changes the fixed seed"),
+            ("random.seed(1)", "changes the fixed seed"),
+            ("torch.backends.cudnn.benchmark = True", "deterministic"),
+            ("torch.use_deterministic_algorithms(False)", "deterministic"),
+        ]:
+            with self.subTest(line=line):
+                self.rejected(self.official + "\n" + line + "\n", expect)
+
+    def test_ordinary_research_code_is_allowed(self):
+        extra = (
+            "import math, random\n"
+            "import numpy as np\n"
+            "import torch.nn.functional as F\n"
+            "from torchvision.transforms import functional as TF\n"
+            "class Solarize(nn.Module):\n"
+            "    def __init__(self):\n"
+            "        super().__init__()\n"
+            "    def forward(self, x):\n"
+            "        self.eval()\n"
+            "        input = vars = x\n"
+            "        return F.normalize(x, dim=-1) * math.sqrt(2.0)\n"
+        )
+        self.assertIsNone(c.validate(self.official + "\n" + extra))
+
+    def test_reason_reports_line_numbers(self):
+        n = len(self.official.splitlines()) + 3
+        self.rejected(self.official + "\n\nimport os\n", f"line {n}:")
+
+
+class TestIntegrityAfterRun(LoopCase):
+    def test_changed_split_file_voids_the_result(self):
+        script = ("import json, os, sys; d = sys.argv[1]; "
+                  "open(os.path.join(d, 'split_config.json'), 'a').write(' '); "
+                  "json.dump({'val_acc': 0.99}, open(os.path.join(d, 'local_eval.json'), 'w'))")
+        cmd = lambda run_dir: [c.sys.executable, "-c", script, run_dir]
+        h = c.run_loop(OFFICIAL, BASELINE_ACC, "baseline", c.ScriptedLLM([("x", marker("acc=0.9"))]),
+                       cmd, self.runs, self.state, 1, 20, log=lambda s: None)
+        self.assertEqual((h[1]["status"], h[1]["val_acc"], h[1]["best_id"]),
+                         ("invalid_patch", None, "baseline"))
+        self.assertIn("split_config.json", h[1]["error"])
+        self.assertEqual(c.read_text(os.path.join(self.state, "best", "algorithm.py")), c.read_text(OFFICIAL))
+
+
+class TestStatic(unittest.TestCase):
 
     def test_real_runner_command_targets_local_eval(self):
         cmd = c.real_runner_cmd("some_dir")

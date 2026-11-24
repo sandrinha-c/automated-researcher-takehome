@@ -32,6 +32,7 @@ import argparse
 import ast
 import datetime
 import difflib
+import hashlib
 import json
 import math
 import os
@@ -83,10 +84,13 @@ several points between seeds, so a small gain may not be a real improvement.
 Rules:
 - Return the COMPLETE new algorithm.py in one ```python block. Nothing else is editable.
 - Keep these top-level names: {", ".join(REQUIRED_SYMBOLS)}.
-- The model must keep .backbone, .projector and .backbone_dim.
+- The model must set self.backbone, self.projector and self.backbone_dim.
+- Imports are limited to: {", ".join(sorted(ALLOWED_IMPORTS))}.
+- No file access, no dataset loading, no downloads (so no pretrained weights), and do not
+  set seeds or deterministic flags. Do not mention the evaluator or split file names.
 - pretrain_epochs, linear_eval_epochs, batch_size, linear_batch_size and linear_lr are
   overridden by the evaluator, so changing them has no effect.
-- Do not read or write any other file. One focused change per proposal.
+- One focused change per proposal.
 
 Reply format:
 HYPOTHESIS: <one sentence: what you change and why it should help>
@@ -206,16 +210,41 @@ def apply_edit(code, parent_code, parent_id, run_dir, data_dir):
 
 # -------------------------------------------------------------------------- 3. validate
 
-def validate(code):
-    """Static checks. Returns None if OK, otherwise the reason (fed back to the LLM).
+# algorithm.py only needs to build a model, a loss and an augmentation. Everything below is
+# refused before any GPU time is spent, so a candidate cannot reach the evaluator, the split
+# file, the dataset labels, other files, or the seeds.
+ALLOWED_IMPORTS = {"torch", "torchvision", "numpy", "math", "random", "typing", "functools",
+                   "itertools", "collections", "copy", "dataclasses", "warnings"}
+REQUIRED_MODEL_ATTRS = ("backbone", "projector", "backbone_dim")  # read by the evaluator
+FORBIDDEN_CALLS = {"open", "exec", "eval", "compile", "__import__", "globals", "locals"}
+FORBIDDEN_ATTRS = {
+    "datasets": "loads a dataset (data and labels belong to the evaluator)",
+    "save": "writes a file", "load": "reads a file", "hub": "downloads code or weights",
+    "load_state_dict_from_url": "downloads weights",
+    "seed": "changes the fixed seed", "manual_seed": "changes the fixed seed",
+    "manual_seed_all": "changes the fixed seed",
+    "use_deterministic_algorithms": "changes deterministic mode",
+    "cudnn": "changes deterministic mode",
+}
+FORBIDDEN_TEXT = ("split_config", "train_eval_baseline", "local_eval", "results_tmp",
+                  "val_info", "model_checkpoint")
+ALLOWED_DUNDERS = {"__init__", "__class__", "__name__"}
 
-    Skeleton version: syntax + required names. The stricter checks (model attributes,
-    no access to the evaluator / split file) are issue #4 and go here.
+
+def validate(code):
+    """Static checks on the candidate source; nothing is imported or executed.
+    Returns None if OK, otherwise the reasons (recorded and fed back to the LLM).
+
+    This is a filter for honest mistakes and obvious shortcuts, not a sandbox. Two further
+    guards do not depend on it: local_eval.py refuses to start if the evaluator or the split
+    file differ from the official copies, and run_loop() re-checks them after every run.
     """
     try:
         tree = ast.parse(code)
     except SyntaxError as e:
         return f"SyntaxError: {e.msg} (line {e.lineno})"
+    problems = []
+
     defined = set()
     for node in tree.body:
         if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
@@ -226,8 +255,56 @@ def validate(code):
             defined.update((a.asname or a.name).split(".")[0] for a in node.names)
     missing = [s for s in REQUIRED_SYMBOLS if s not in defined]
     if missing:
-        return "missing required top-level names: " + ", ".join(missing)
-    return None
+        problems.append("missing required top-level names: " + ", ".join(missing))
+
+    assigned_attrs = {n.attr for n in ast.walk(tree)
+                      if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)}
+    missing = [a for a in REQUIRED_MODEL_ATTRS if a not in assigned_attrs]
+    if missing:
+        problems.append("the model never sets self." + ", self.".join(missing) +
+                        " (the evaluator reads .backbone, .projector and .backbone_dim)")
+
+    for node in ast.walk(tree):
+        line = f"line {getattr(node, 'lineno', '?')}: "
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            if isinstance(node, ast.ImportFrom) and node.level:
+                modules = ["(relative import)"]
+            elif isinstance(node, ast.ImportFrom):
+                modules = [node.module]
+            else:
+                modules = [a.name for a in node.names]
+            for m in modules:
+                if m.split(".")[0] not in ALLOWED_IMPORTS:
+                    problems.append(f"{line}import of '{m}' is not allowed "
+                                    f"(allowed: {', '.join(sorted(ALLOWED_IMPORTS))})")
+            names = [a.name for a in node.names] if isinstance(node, ast.ImportFrom) else []
+            names += [part for m in modules for part in m.split(".")[1:]]
+            for n in names:
+                if n in FORBIDDEN_ATTRS:
+                    problems.append(f"{line}'{n}' is not allowed: {FORBIDDEN_ATTRS[n]}")
+        elif isinstance(node, ast.Name) and node.id in FORBIDDEN_CALLS | {"__builtins__"}:
+            problems.append(f"{line}'{node.id}' is not allowed")
+        elif isinstance(node, ast.Attribute):
+            if node.attr in FORBIDDEN_ATTRS:
+                problems.append(f"{line}'.{node.attr}' is not allowed: {FORBIDDEN_ATTRS[node.attr]}")
+            elif node.attr.startswith("__") and node.attr not in ALLOWED_DUNDERS:
+                problems.append(f"{line}'.{node.attr}' is not allowed")
+        elif isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+            text = node.value if isinstance(node.value, str) else node.value.decode("latin-1")
+            for word in FORBIDDEN_TEXT:
+                if word in text:
+                    problems.append(f"{line}mentions '{word}' (evaluator files are off limits)")
+    return "\n".join(problems[:8]) or None
+
+
+def protected_files_changed(run_dir):
+    """Names of the evaluator / split copies in run_dir that no longer match task/."""
+    def digest(path):
+        with open(path, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+    return [n for n in PROTECTED_FILES
+            if not os.path.exists(os.path.join(run_dir, n))
+            or digest(os.path.join(run_dir, n)) != digest(os.path.join(TASK_DIR, n))]
 
 
 # -------------------------------------------------------------------- 4. run_experiment
@@ -349,7 +426,11 @@ def run_loop(baseline_path, baseline_acc, baseline_id, llm, runner_cmd, runs_dir
         if entry["error"] is None:
             result = run_experiment(run_dir, runner_cmd(run_dir), timeout_s)             # 4
             entry.update(result)
-            if result["status"] == "ok":
+            changed = protected_files_changed(run_dir)
+            if changed:  # the score cannot be trusted, whatever it is
+                entry.update(status="invalid_patch", val_acc=None,
+                             error="evaluator files changed during the run: " + ", ".join(changed))
+            elif result["status"] == "ok":
                 accepted = evaluate(result["val_acc"], best_acc)                         # 5
                 entry["status"] = "accepted" if accepted else "rejected"
                 if accepted:

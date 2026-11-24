@@ -1,0 +1,109 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="720" viewBox="0 0 1280 720" font-family="Segoe UI, Helvetica, Arial, sans-serif">
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#52514e"/></marker></defs>
+<rect width="1280" height="720" fill="#fcfcfb"/>
+<text x="40.0" y="40.0" font-size="20" fill="#0b0b0b" font-weight="600" text-anchor="start" xml:space="preserve">Architecture: one round of the research loop</text>
+<text x="40.0" y="62.0" font-size="13" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">The LLM only writes text. What is run, how it is scored and whether it is accepted are fixed rules in controller.py.</text>
+<rect x="890.0" y="29.0" width="14.0" height="14.0" rx="3" fill="#cde2fb" stroke="#2a78d6" stroke-width="1"/>
+<text x="910.0" y="40.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">LLM decision</text>
+<rect x="1000.0" y="29.0" width="14.0" height="14.0" rx="3" fill="#f0efec" stroke="#c3c2b7" stroke-width="1"/>
+<text x="1020.0" y="40.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">fixed program rule (controller.py)</text>
+<path d="M156.0,150.0 L156.0,122.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 3"/>
+<text x="164.0" y="139.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">llm_error, invalid_patch</text>
+<path d="M548.0,150.0 L548.0,122.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 3"/>
+<text x="556.0" y="139.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">invalid_patch</text>
+<path d="M744.0,150.0 L744.0,122.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="4 3"/>
+<text x="752.0" y="139.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">crash, timeout</text>
+<path d="M156.0,122.0 L1136.0,122.0 L1136.0,148.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)" stroke-dasharray="4 3"/>
+<text x="1144.0" y="139.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">failures</text>
+<text x="940.0" y="114.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="middle" xml:space="preserve">a failed step is recorded and the loop goes on</text>
+<rect x="70.0" y="150.0" width="172.0" height="132.0" rx="6" fill="#cde2fb" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="82.0" y="172.0" font-size="12" fill="#52514e" font-weight="600" text-anchor="start" xml:space="preserve">1  LLM</text>
+<text x="82.0" y="196.0" font-size="16" fill="#0b0b0b" font-weight="700" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">propose()</text>
+<text x="82.0" y="220.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">asks the LLM for one</text>
+<text x="82.0" y="237.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">hypothesis and a full</text>
+<text x="82.0" y="254.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">new algorithm.py</text>
+<rect x="266.0" y="150.0" width="172.0" height="132.0" rx="6" fill="#f0efec" stroke="#c3c2b7" stroke-width="1.5"/>
+<text x="278.0" y="172.0" font-size="12" fill="#52514e" font-weight="600" text-anchor="start" xml:space="preserve">2  Code editor</text>
+<text x="278.0" y="196.0" font-size="16" fill="#0b0b0b" font-weight="700" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">apply_edit()</text>
+<text x="278.0" y="220.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">writes the candidate</text>
+<text x="278.0" y="237.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">into its own run folder,</text>
+<text x="278.0" y="254.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">saves the diff</text>
+<rect x="462.0" y="150.0" width="172.0" height="132.0" rx="6" fill="#f0efec" stroke="#c3c2b7" stroke-width="1.5"/>
+<text x="474.0" y="172.0" font-size="12" fill="#52514e" font-weight="600" text-anchor="start" xml:space="preserve">3  Static check</text>
+<text x="474.0" y="196.0" font-size="16" fill="#0b0b0b" font-weight="700" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">validate()</text>
+<text x="474.0" y="220.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">syntax, required names,</text>
+<text x="474.0" y="237.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">import allow-list, no file,</text>
+<text x="474.0" y="254.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">dataset or seed access</text>
+<rect x="658.0" y="150.0" width="172.0" height="132.0" rx="6" fill="#f0efec" stroke="#c3c2b7" stroke-width="1.5"/>
+<text x="670.0" y="172.0" font-size="12" fill="#52514e" font-weight="600" text-anchor="start" xml:space="preserve">4  Experiment runner</text>
+<text x="670.0" y="196.0" font-size="16" fill="#0b0b0b" font-weight="700" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">run_experiment()</text>
+<text x="670.0" y="220.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">separate process,</text>
+<text x="670.0" y="237.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">40 min time limit,</text>
+<text x="670.0" y="254.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">killed on timeout</text>
+<rect x="854.0" y="150.0" width="172.0" height="132.0" rx="6" fill="#f0efec" stroke="#c3c2b7" stroke-width="1.5"/>
+<text x="866.0" y="172.0" font-size="12" fill="#52514e" font-weight="600" text-anchor="start" xml:space="preserve">5  Acceptance rule</text>
+<text x="866.0" y="196.0" font-size="16" fill="#0b0b0b" font-weight="700" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">evaluate()</text>
+<text x="866.0" y="220.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">accept only if</text>
+<text x="866.0" y="237.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">val_acc &gt; best</text>
+<text x="866.0" y="254.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">(strictly greater)</text>
+<rect x="1050.0" y="150.0" width="172.0" height="132.0" rx="6" fill="#f0efec" stroke="#c3c2b7" stroke-width="1.5"/>
+<text x="1062.0" y="172.0" font-size="12" fill="#52514e" font-weight="600" text-anchor="start" xml:space="preserve">6  Recorder</text>
+<text x="1062.0" y="196.0" font-size="16" fill="#0b0b0b" font-weight="700" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">record()</text>
+<text x="1062.0" y="220.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">appends the outcome,</text>
+<text x="1062.0" y="237.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">then the next round, up</text>
+<text x="1062.0" y="254.0" font-size="12.5" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">to --max-experiments</text>
+<path d="M245.0,216.0 L263.0,216.0" fill="none" stroke="#52514e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<path d="M441.0,216.0 L459.0,216.0" fill="none" stroke="#52514e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<path d="M637.0,216.0 L655.0,216.0" fill="none" stroke="#52514e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<path d="M833.0,216.0 L851.0,216.0" fill="none" stroke="#52514e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<path d="M1029.0,216.0 L1047.0,216.0" fill="none" stroke="#52514e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<rect x="70.0" y="348.0" width="172.0" height="92.0" rx="6" fill="#cde2fb" stroke="#2a78d6" stroke-width="1.5"/>
+<text x="82.0" y="370.0" font-size="15" fill="#0b0b0b" font-weight="700" text-anchor="start" xml:space="preserve">Claude Opus</text>
+<text x="82.0" y="390.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">ClaudeCLI runs `claude -p`:</text>
+<text x="82.0" y="406.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">text in, text out,</text>
+<text x="82.0" y="422.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">no tools, no file access</text>
+<path d="M126.0,285.0 L126.0,345.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<path d="M186.0,345.0 L186.0,285.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<text x="118.0" y="320.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="end" xml:space="preserve">prompt</text>
+<text x="194.0" y="320.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">reply</text>
+<rect x="522.0" y="348.0" width="372.0" height="112.0" rx="6" fill="#f0efec" stroke="#c3c2b7" stroke-width="1.5"/>
+<text x="534.0" y="370.0" font-size="15" fill="#0b0b0b" font-weight="700" text-anchor="start" xml:space="preserve">Evaluator</text>
+<text x="534.0" y="390.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">local_eval.py → task/train_eval_baseline.py</text>
+<text x="534.0" y="410.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">official evaluator, never edited: hashes are checked before</text>
+<text x="534.0" y="426.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">and after each run. Same budget (20 pretrain epochs), same</text>
+<text x="534.0" y="442.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">seed (42), validation split only: test labels are never read.</text>
+<path d="M714.0,285.0 L714.0,345.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<path d="M774.0,345.0 L774.0,285.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<text x="706.0" y="320.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="end" xml:space="preserve">runs</text>
+<text x="782.0" y="320.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">val_acc</text>
+<rect x="40.0" y="522.0" width="1200.0" height="150.0" rx="6" fill="#fcfcfb" stroke="#c3c2b7" stroke-width="1.5"/>
+<text x="56.0" y="548.0" font-size="15" fill="#0b0b0b" font-weight="700" text-anchor="start" xml:space="preserve">Research memory</text>
+<text x="190.0" y="548.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">plain files on disk, all kept in the repository</text>
+<text x="56.0" y="580.0" font-size="13" fill="#0b0b0b" font-weight="700" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">loop/runs.jsonl</text>
+<text x="56.0" y="600.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">one line per experiment: status,</text>
+<text x="56.0" y="616.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">val_acc, hypothesis, error,</text>
+<text x="56.0" y="632.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">LLM model and cost</text>
+<text x="352.0" y="580.0" font-size="13" fill="#0b0b0b" font-weight="700" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">loop/best/algorithm.py</text>
+<text x="352.0" y="600.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">the current best; replaced</text>
+<text x="352.0" y="616.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">only when a candidate</text>
+<text x="352.0" y="632.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">is accepted</text>
+<text x="648.0" y="580.0" font-size="13" fill="#0b0b0b" font-weight="700" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">loop/baseline/algorithm.py</text>
+<text x="648.0" y="600.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">byte copy of the baseline,</text>
+<text x="648.0" y="616.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">never overwritten</text>
+<text x="944.0" y="580.0" font-size="13" fill="#0b0b0b" font-weight="700" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">runs/NNN_loop/</text>
+<text x="944.0" y="600.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">prompt.txt, llm_reply.txt,</text>
+<text x="944.0" y="616.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">algorithm.py, diff.patch,</text>
+<text x="944.0" y="632.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">stdout.log, local_eval.json</text>
+<path d="M40.0,562.0 L24.0,562.0 L24.0,216.0 L67.0,216.0" fill="none" stroke="#52514e" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<text x="34.0" y="462.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">next round: best code +</text>
+<text x="34.0" y="478.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">all past results and errors</text>
+<path d="M352.0,285.0 L352.0,519.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<text x="360.0" y="486.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">writes</text>
+<text x="360.0" y="502.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">runs/NNN_loop/</text>
+<path d="M940.0,285.0 L940.0,519.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<text x="948.0" y="486.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">if accepted:</text>
+<text x="948.0" y="502.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">new best</text>
+<path d="M1136.0,285.0 L1136.0,519.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
+<text x="1144.0" y="486.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">appends</text>
+<text x="1144.0" y="502.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" xml:space="preserve">one line</text>
+</svg>

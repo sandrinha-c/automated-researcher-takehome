@@ -1,0 +1,22 @@
+--- 015_loop/algorithm.py
++++ 017_loop/algorithm.py
+@@ -14,8 +14,8 @@
+ - Linear warmup of the loss scale over the first training steps. With SGD,
+   scaling the loss scales the gradient, so this acts as an LR warmup (the
+   optimizer schedule itself has no warmup).
+-- Lower base learning rate (0.2), since a higher LR reduced feature rank
+-  and accuracy.
++- Lower base learning rate (0.05): accuracy and feature rank went up
++  steadily as LR came down from 0.8.
+ """
+ import torch
+ import torch.nn as nn
+@@ -110,7 +110,7 @@
+         'pretrain_epochs': 130,
+         'linear_eval_epochs': 100,
+         'batch_size': 512,
+-        'lr': 0.2,
++        'lr': 0.05,
+         'weight_decay': 1e-4,
+         'lambda_param': 5e-3,       # Barlow Twins off-diagonal penalty
+         'linear_lr': 0.1,

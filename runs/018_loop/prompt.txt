@@ -1,0 +1,247 @@
+You are improving a self-supervised learning method (Barlow Twins, ResNet-18, CIFAR-100).
+The score is validation accuracy (in %) of a linear probe on the frozen backbone. Higher is better.
+Every training run has 20 pretrain epochs and is deterministic for a given code and seed.
+
+How a candidate is judged (fixed rules in the controller, not your decision):
+- It is first trained once with seed 42. If that score is more than 1 point(s) below the
+  current best's score on that seed, it is dropped without further runs (screened_out).
+- Otherwise it is also trained with seeds 43, 44. It replaces the current best only if its
+  mean over the 3 seeds is strictly greater than the current best's mean.
+- Noise: the current best (017_loop) scores 47.50, 47.10, 47.43 on the 3 seeds. A difference
+  in mean below about 0.3 points is within noise, so prefer a change that should help
+  clearly on every seed over a small tweak.
+- A run is killed after 40 minutes.
+
+Rules:
+- Return the COMPLETE new algorithm.py in one ```python block. Nothing else is editable.
+- Keep these top-level names: get_model, get_training_config, get_augmentation, BarlowTwinsLoss.
+- The model must set self.backbone, self.projector and self.backbone_dim.
+- Imports are limited to: collections, copy, dataclasses, functools, itertools, math, numpy, random, torch, torchvision, typing, warnings.
+- No file access, no dataset loading, no downloads (so no pretrained weights), and do not
+  set seeds or deterministic flags. Do not mention the evaluator or split file names.
+- pretrain_epochs, linear_eval_epochs, batch_size, linear_batch_size and linear_lr are
+  overridden by the evaluator, so changing them has no effect.
+- One focused change per proposal, and not the same code as an earlier experiment.
+
+How the evaluator uses your file (it is fixed and you cannot change it):
+- config = get_training_config() must contain lr, weight_decay and lambda_param.
+- The loss is built as BarlowTwinsLoss(lambda_param=config["lambda_param"], embedding_dim=2048)
+  and called as loss(z1, z2). Its own parameters are NOT passed to the optimizer.
+- model(x) must return (features, projections); features must have backbone_dim columns.
+- Pretraining is SGD(model.parameters(), lr, momentum=0.9, weight_decay) with a cosine
+  schedule over the epochs and no warmup. One optimizer step per batch of two views.
+- get_augmentation() is called once and applied to a PIL image, twice per image, inside
+  DataLoader worker processes: it must be picklable (no lambda, no local function).
+
+What the list of experiments shows for each candidate: its scores per seed, the code lines
+it changed against its parent (comments and docstrings left out), the mean pretrain loss of
+every epoch (not comparable between different loss functions; "nan" = diverged) and two
+numbers about the frozen features of the validation images: effective rank (1 = collapsed
+to one direction, 512 = all dimensions used for a 512-d backbone) and mean standard deviation.
+Use them to reason about WHY a candidate did what it did.
+
+Reply format:
+HYPOTHESIS: <one sentence: what you change and why it should help>
+CATEGORY: <one of: augmentation, loss, architecture, optimisation, other>
+BASIS: <known | results | both> - <known = a recipe you recall from papers or other code;
+results = you reasoned from the experiments below; say which experiment ids you used>
+```python
+<full algorithm.py>
+```
+
+Experiments so far (current best = 017_loop, mean 47.35):
+- 009_loop [baseline] | seed 42=20.03, seed 43=22.01, seed 44=19.07, mean=20.37
+    hypothesis: Final best of an earlier single-seed loop (seed 42 only). History there: unmodified baseline 17.01 on seed 42 (and 9.47 / 9.53 on seeds 43 / 44, where its training was unstable); removing GaussianBlur 18.40 (accepted); then RandomResizedCrop scale (0.2,1.0) -> (0.35,1.0) 16.09 (rejected); then loss x 0.1 = this code.
+    pretrain loss, first -> last epoch: 176.6455 -> 107.0853
+- 012_loop [rejected] category=architecture basis=both - known (Goyal et al. "Accurate, Large Minibatch SGD"; used in BYOL/Barlow Twins/SimSiam ImageNet code) plus results from 009_loop. In 009_loop the history shows the unscaled baseline was unstabl | seed 42=19.96, seed 43=14.00, seed 44=21.48, mean=18.48 | 26.0 min per run
+    hypothesis: Building the ResNet-18 with zero_init_residual=True should give a cleaner, more stable start under high-lr SGD with no warmup, and so better features on every seed within 20 epochs. It sets the last BN gamma of each residual block to 0, so every block starts as an identity map. The old baseline's unstable seeds (9.47 / 9.53) and the 19–22 spread now both point to early-training instability.
+    - backbone = models.resnet18(weights=None)
+    + backbone = models.resnet18(weights=None, zero_init_residual=True)
+    + nn.init.kaiming_normal_(backbone.conv1.weight, mode="fan_out", nonlinearity="relu")
+    pretrain loss per epoch (first seed): 148.9 136.6 134.1 132 127.2 125.9 122.2 119.3 114.7 108 103.2 97.9 94.71 90.71 88.32 86.24 85.18 83.73 83.01 82.46
+    features (first seed): effective rank 58.1 of 512, mean std 1.0582
+- 013_loop [accepted] category=optimisation basis=both - known (linear LR warmup from Goyal et al., used in the SimCLR, BYOL and Barlow Twins recipes) plus results from 009_loop (baseline seeds 43/44 collapsed to about 9.5, and the 0.1 loss scale onl | seed 42=34.43, seed 43=32.87, seed 44=35.95, mean=34.41 | 26.2 min per run
+    hypothesis: Add a linear warmup over the first ~200 optimizer steps (about 2 epochs) by ramping the loss scale from near 0 to 0.1; with SGD+momentum this acts like an LR warmup, which should prevent the early high-LR instability seen in 009's unstable baseline seeds and 012's seed-43 drop, and so give more and better-used feature dimensions (012 reached only rank 58) on every seed.
+    - def __init__(self, lambda_param=5e-3, embedding_dim=2048, scale_loss=0.1):
+    + def __init__(self, lambda_param=5e-3, embedding_dim=2048, scale_loss=0.1,
+    + warmup_steps=200):
+    + self.warmup_steps = warmup_steps
+    + self.register_buffer("step", torch.zeros((), dtype=torch.long))
+    + def _warmup_factor(self):
+    + if not (self.training and torch.is_grad_enabled()):
+    + return 1.0
+    + s = int(self.step.item())
+    + self.step += 1
+    + if s >= self.warmup_steps:
+    + return 1.0
+    + return float(s + 1) / float(self.warmup_steps)
+    - return self.scale_loss * (on_diag + self.lambda_param * off_diag)
+    + factor = self._warmup_factor()
+    + return factor * self.scale_loss * (on_diag + self.lambda_param * off_diag)
+    pretrain loss per epoch (first seed): 31.04 86.73 107.5 100.5 93.44 86.38 80.54 75.33 71.07 66.45 62.38 59.55 56.87 54.22 52.36 50.91 49.81 48.83 48.38 48
+    features (first seed): effective rank 182.7 of 512, mean std 0.4215
+- 014_loop [screened_out] category=optimisation basis=both - known (short SSL schedules gain from the largest stable LR once warmup is in place, as in Goyal et al. and the SimCLR/BYOL recipes) plus results from 009_loop, 012_loop and 013_loop. The baseli | seed 42=30.75 | 26.1 min per run
+    hypothesis: Doubling the base learning rate from 0.4 to 0.8 should make the 20-epoch budget learn clearly more on every seed. The 200-step warmup from 013_loop now handles the early-training instability that made a higher effective step size unsafe before. 013 shows the model is under-trained (the loss is still falling steadily and effective rank is only 182.7 of 512), and the cosine schedule spends half of its 20 epochs at small LRs.
+    - 'lr': 0.4,
+    + 'lr': 0.8,
+    pretrain loss per epoch (first seed): 33.72 90.67 120.1 110.1 104.9 99.34 94.29 88.88 84.37 79.07 74.08 69.9 65.84 62.91 59.8 57.29 55.72 54.48 53.99 53.49
+    features (first seed): effective rank 147.9 of 512, mean std 0.449
+- 015_loop [accepted] category=optimisation basis=both - known (solo-learn's CIFAR Barlow Twins recipe uses a base LR of about 0.3 with scale_loss 0.1) plus results from 013_loop and 014_loop (the LR trend, and effective rank dropping as LR rose). | seed 42=39.16, seed 43=41.91, seed 44=37.11, mean=39.39 | 25.7 min per run
+    hypothesis: Halving the base learning rate from 0.4 to 0.2 should give better-conditioned features on every seed, because doubling it in 014_loop clearly hurt, and lowering it continues that trend in the helpful direction. In 014_loop, going 0.4→0.8 cost 3.7 points on seed 42, and effective rank fell from 182.7 to 147.9. With the 200-step warmup in place, the optimum for this 20-epoch run looks to sit at or below 0.4, and a smaller step should keep more feature dimensions in use.
+    - 'lr': 0.4,
+    + 'lr': 0.2,
+    pretrain loss per epoch (first seed): 30.44 77.57 97.84 86.4 79.67 72.07 67.27 62.25 58.12 55.15 52.01 49.71 47.62 45.9 44.25 42.87 41.72 40.86 40.61 40.29
+    features (first seed): effective rank 189.0 of 512, mean std 0.4918
+- 016_loop [crash] category=optimisation basis=results - from 013_loop, 014_loop and 015_loop: each halving of LR gave about +4.7 points on seed 42 and higher feature rank. The 015 loss curve also falls smoothly and is not stalling. | seed 42=46.97, seed 43=45.51 | 26.0 min per run
+    hypothesis: Lowering the base learning rate from 0.2 to 0.1 should continue the clear trend across 014, 013 and 015, and so improve accuracy on every seed. Seed 42 went 30.75 → 34.43 → 39.16 as LR went 0.8 → 0.4 → 0.2, and effective rank went 147.9 → 182.7 → 189.0. That suggests the optimum with scale_loss 0.1 and no LARS sits below 0.2.
+    - 'lr': 0.2,
+    + 'lr': 0.1,
+    pretrain loss per epoch (first seed): 22.65 54.57 63.48 54.53 49.09 44.51 40.63 37.49 34.82 32.93 31.3 29.98 28.88 27.9 27.26 26.55 26.15 25.83 25.72 25.52
+    features (first seed): effective rank 227.3 of 512, mean std 0.5261
+    error: seed 44: exit code 3221226505
+    LOCAL_EVAL budget={'pretrain_epochs': 20, 'linear_eval_epochs': 100, 'batch_size': 512, 'linear_batch_size': 256, 'linear_lr': 0.1} seed=44 linear_probe_seed=102 deterministic=True (harness log lines showing seed=100 are overridden when seed!=42)
+- 017_loop [accepted] category=optimisation basis=results - from 014_loop, 013_loop, 015_loop and 016_loop. As LR went 0.8 → 0.4 → 0.2 → 0.1, seed 42 went 30.75 → 34.43 → 39.16 → 46.97 and effective rank went 147.9 → 182.7 → 189.0 → 227.3, with no si | seed 42=47.50, seed 43=47.10, seed 44=47.43, mean=47.35 | 25.7 min per run
+    hypothesis: Lowering the base learning rate from 0.2 to 0.05 should continue the steady LR-down trend and give clearly higher accuracy and feature rank on every seed. 016 (lr 0.1, whose seed 44 crashed with a Windows process error rather than diverging) already reached 46.97/45.51 against the best's 39.16/41.91, and its loss and effective rank were still improving as LR fell.
+    - 'lr': 0.2,
+    + 'lr': 0.05,
+    pretrain loss per epoch (first seed): 20.39 47.54 54.77 48.21 42.68 38.47 35.65 33.07 31.08 29.73 28.54 27.52 26.63 25.86 25.4 24.83 24.54 24.28 24.2 24
+    features (first seed): effective rank 228.8 of 512, mean std 0.6033
+
+Categories so far: augmentation: 0 tried / 0 accepted, loss: 0 tried / 0 accepted, architecture: 1 tried / 0 accepted, optimisation: 5 tried / 3 accepted, other: 0 tried / 0 accepted
+
+Current best algorithm.py:
+```python
+"""
+Self-supervised learning algorithm: Barlow Twins on CIFAR-100.
+
+Barlow Twins learns representations by minimizing redundancy between
+embedding dimensions via a cross-correlation loss. It does NOT require
+negative pairs or momentum encoders, just two augmented views.
+
+Changes vs. baseline:
+- GaussianBlur removed from the augmentation pipeline, since it is harmful
+  at 32x32 resolution.
+- The loss is multiplied by a scale factor (0.1, as in solo-learn's CIFAR
+  Barlow Twins recipe). This tames the very large gradients that come from
+  summing over a 2048x2048 cross-correlation matrix.
+- Linear warmup of the loss scale over the first training steps. With SGD,
+  scaling the loss scales the gradient, so this acts as an LR warmup (the
+  optimizer schedule itself has no warmup).
+- Lower base learning rate (0.05): accuracy and feature rank went up
+  steadily as LR came down from 0.8.
+"""
+import torch
+import torch.nn as nn
+import torchvision.models as models
+import torchvision.transforms as transforms
+
+
+class BarlowTwinsLoss(nn.Module):
+    """Barlow Twins loss: cross-correlation matrix -> identity (scaled, with warmup)."""
+
+    def __init__(self, lambda_param=5e-3, embedding_dim=2048, scale_loss=0.1,
+                 warmup_steps=200):
+        super().__init__()
+        self.lambda_param = lambda_param
+        self.scale_loss = scale_loss
+        self.warmup_steps = warmup_steps
+        self.bn = nn.BatchNorm1d(embedding_dim, affine=False)
+        self.register_buffer("step", torch.zeros((), dtype=torch.long))
+
+    def _warmup_factor(self):
+        if not (self.training and torch.is_grad_enabled()):
+            return 1.0
+        s = int(self.step.item())
+        self.step += 1
+        if s >= self.warmup_steps:
+            return 1.0
+        return float(s + 1) / float(self.warmup_steps)
+
+    def forward(self, z1, z2):
+        z1 = self.bn(z1)
+        z2 = self.bn(z2)
+        batch_size = z1.shape[0]
+
+        # Cross-correlation matrix
+        c = z1.T @ z2 / batch_size
+
+        # Loss: on-diagonal -> 1, off-diagonal -> 0
+        on_diag = (1 - c.diagonal()).pow(2).sum()
+        off_diag = c.flatten()[:-1].view(c.shape[0] - 1, c.shape[0] + 1)[:, 1:].flatten().pow(2).sum()
+        factor = self._warmup_factor()
+        return factor * self.scale_loss * (on_diag + self.lambda_param * off_diag)
+
+
+class ProjectionHead(nn.Module):
+    """3-layer projection head for Barlow Twins."""
+
+    def __init__(self, input_dim=512, hidden_dim=2048, output_dim=2048):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, output_dim),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class BarlowTwinsModel(nn.Module):
+    """ResNet-18 backbone + projection head for Barlow Twins."""
+
+    def __init__(self, proj_hidden_dim=2048, proj_output_dim=2048):
+        super().__init__()
+        # ResNet-18 backbone (remove final FC)
+        backbone = models.resnet18(weights=None)
+        self.backbone_dim = backbone.fc.in_features  # 512
+        backbone.fc = nn.Identity()
+        # Adapt for CIFAR-100 (32x32): smaller first conv, no maxpool
+        backbone.conv1 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
+        backbone.maxpool = nn.Identity()
+        self.backbone = backbone
+        self.projector = ProjectionHead(self.backbone_dim, proj_hidden_dim, proj_output_dim)
+
+    def forward(self, x):
+        features = self.backbone(x)
+        projections = self.projector(features)
+        return features, projections
+
+
+def get_model():
+    """Return Barlow Twins model."""
+    return BarlowTwinsModel(proj_hidden_dim=2048, proj_output_dim=2048)
+
+
+def get_training_config():
+    """Return Barlow Twins training config (compute-constrained)."""
+    return {
+        'pretrain_epochs': 130,
+        'linear_eval_epochs': 100,
+        'batch_size': 512,
+        'lr': 0.05,
+        'weight_decay': 1e-4,
+        'lambda_param': 5e-3,       # Barlow Twins off-diagonal penalty
+        'linear_lr': 0.1,
+        'linear_batch_size': 256,
+    }
+
+
+def get_augmentation():
+    """Return augmentation transforms for Barlow Twins (no blur for 32x32 images)."""
+    mean = (0.5071, 0.4867, 0.4408)
+    std = (0.2675, 0.2565, 0.2761)
+
+    return transforms.Compose([
+        transforms.RandomResizedCrop(32, scale=(0.2, 1.0)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
+```

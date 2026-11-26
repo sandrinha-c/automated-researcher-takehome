@@ -1,0 +1,56 @@
+[012_loop] proposing (best = 009_loop, mean 0.2037, runs used 0/3, stuck 0)
+[012_loop] seed 42: 0.1996 (best has 0.2003)
+[012_loop] seed 43: 0.1400 (best has 0.2201)
+[012_loop] seed 44: 0.2148 (best has 0.1907)
+[012_loop] rejected mean=0.1848
+stopped: run budget reached (3 of 3 used; a candidate needs up to 3)
+
+stopped: run budget reached (3 of 3 used; a candidate needs up to 3)
+id            status         category       s42     s43     s44     mean    best
+009_loop      baseline       -              0.2003  0.2201  0.1907  0.2037  0.2037
+012_loop      rejected       architecture   0.1996  0.1400  0.2148  0.1848  0.2037
+[013_loop] proposing (best = 009_loop, mean 0.2037, runs used 3/23, stuck 1)
+[013_loop] seed 42: 0.3443 (best has 0.2003)
+[013_loop] seed 43: 0.3287 (best has 0.2201)
+[013_loop] seed 44: 0.3595 (best has 0.1907)
+[013_loop] accepted mean=0.3441
+[014_loop] proposing (best = 013_loop, mean 0.3441, runs used 6/23, stuck 0)
+[014_loop] seed 42: 0.3075 (best has 0.3443)
+[014_loop] screened_out
+[015_loop] proposing (best = 013_loop, mean 0.3441, runs used 7/23, stuck 1)
+[015_loop] seed 42: 0.3916 (best has 0.3443)
+[015_loop] seed 43: 0.4191 (best has 0.3287)
+[015_loop] seed 44: 0.3711 (best has 0.3595)
+[015_loop] accepted mean=0.3939
+[016_loop] proposing (best = 015_loop, mean 0.3939, runs used 10/23, stuck 0)
+[016_loop] seed 42: 0.4697 (best has 0.3916)
+[016_loop] seed 43: 0.4551 (best has 0.4191)
+[016_loop] crash | LOCAL_EVAL budget={'pretrain_epochs': 20, 'linear_eval_epochs': 100, 'batch_size': 512, 'linear_batch_size': 256, 'linear_lr': 0.1} seed=44 linear_probe_seed=102 deterministic=True (harness log lines showing seed=100 are overridden when seed!=42)
+[017_loop] proposing (best = 015_loop, mean 0.3939, runs used 13/23, stuck 1)
+[017_loop] seed 42: 0.4750 (best has 0.3916)
+[017_loop] seed 43: 0.4710 (best has 0.4191)
+[017_loop] seed 44: 0.4743 (best has 0.3711)
+[017_loop] accepted mean=0.4735
+[018_loop] proposing (best = 017_loop, mean 0.4735, runs used 16/23, stuck 0)
+[018_loop] seed 42: 0.4743 (best has 0.4750)
+[018_loop] seed 43: 0.4899 (best has 0.4710)
+[018_loop] seed 44: 0.4757 (best has 0.4743)
+[018_loop] accepted mean=0.4800
+[019_loop] proposing (best = 018_loop, mean 0.4800, runs used 19/23, stuck 0)
+[019_loop] seed 42: 0.4681 (best has 0.4743)
+[019_loop] seed 43: 0.4661 (best has 0.4899)
+[019_loop] seed 44: 0.4482 (best has 0.4757)
+[019_loop] rejected mean=0.4608
+stopped: run budget reached (22 of 23 used; a candidate needs up to 3)
+
+stopped: run budget reached (22 of 23 used; a candidate needs up to 3)
+id            status         category       s42     s43     s44     mean    best
+009_loop      baseline       -              0.2003  0.2201  0.1907  0.2037  0.2037
+012_loop      rejected       architecture   0.1996  0.1400  0.2148  0.1848  0.2037
+013_loop      accepted       optimisation   0.3443  0.3287  0.3595  0.3441  0.3441
+014_loop      screened_out   optimisation   0.3075    -       -       -     0.3441
+015_loop      accepted       optimisation   0.3916  0.4191  0.3711  0.3939  0.3939
+016_loop      crash          optimisation   0.4697  0.4551    -       -     0.3939
+017_loop      accepted       optimisation   0.4750  0.4710  0.4743  0.4735  0.4735
+018_loop      accepted       optimisation   0.4743  0.4899  0.4757  0.4800  0.4800
+019_loop      rejected       augmentation   0.4681  0.4661  0.4482  0.4608  0.4800

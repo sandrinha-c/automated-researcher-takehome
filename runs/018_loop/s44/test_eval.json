@@ -1,0 +1,15 @@
+{
+  "test_acc": 0.4884285628795624,
+  "val_acc": 0.47567030787467957,
+  "seed": 44,
+  "linear_seed": 202,
+  "budget": {
+    "pretrain_epochs": 20,
+    "linear_eval_epochs": 100,
+    "batch_size": 512,
+    "linear_batch_size": 256,
+    "linear_lr": 0.1
+  },
+  "checkpoint_sha256": "1bbf2c9c34999105cb90432df5f9c1cd1588cc54b5d80b748b9c34c750760c29",
+  "harness_sha256": "6a4f78b42b40da3b9c39b6b5e4db587372623dba7b20f1b95ee64175a2a1d682"
+}

@@ -1,0 +1,31 @@
+--- 015_loop/algorithm.py
++++ 016_loop/algorithm.py
+@@ -8,14 +8,12 @@
+ Changes vs. baseline:
+ - GaussianBlur removed from the augmentation pipeline, since it is harmful
+   at 32x32 resolution.
+-- The loss is multiplied by a scale factor (0.1, as in solo-learn's CIFAR
+-  Barlow Twins recipe). This tames the very large gradients that come from
+-  summing over a 2048x2048 cross-correlation matrix.
++- The loss is multiplied by a scale factor (0.1). This tames the very large
++  gradients that come from summing over a 2048x2048 cross-correlation matrix.
+ - Linear warmup of the loss scale over the first training steps. With SGD,
+-  scaling the loss scales the gradient, so this acts as an LR warmup (the
+-  optimizer schedule itself has no warmup).
+-- Lower base learning rate (0.2), since a higher LR reduced feature rank
+-  and accuracy.
++  scaling the loss scales the gradient, so this acts as an LR warmup.
++- Lower base learning rate (0.1). Accuracy and feature rank have risen
++  steadily as the LR was lowered (0.8 -> 0.4 -> 0.2).
+ """
+ import torch
+ import torch.nn as nn
+@@ -110,7 +108,7 @@
+         'pretrain_epochs': 130,
+         'linear_eval_epochs': 100,
+         'batch_size': 512,
+-        'lr': 0.2,
++        'lr': 0.1,
+         'weight_decay': 1e-4,
+         'lambda_param': 5e-3,       # Barlow Twins off-diagonal penalty
+         'linear_lr': 0.1,

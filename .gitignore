@@ -28,3 +28,4 @@ Thumbs.db
 # Per-experiment heavy outputs
 model_checkpoint/
 runs/*/data
+runs/*/*/data

@@ -1,0 +1,43 @@
+{
+  "val_acc": 0.32869911193847656,
+  "budget": {
+    "pretrain_epochs": 20,
+    "linear_eval_epochs": 100,
+    "batch_size": 512,
+    "linear_batch_size": 256,
+    "linear_lr": 0.1
+  },
+  "seconds": 1571.0,
+  "seed": 43,
+  "linear_seed": 101,
+  "deterministic": true,
+  "harness_sha256": "6a4f78b42b40da3b9c39b6b5e4db587372623dba7b20f1b95ee64175a2a1d682",
+  "loss_curve": [
+    32.8849,
+    89.7363,
+    112.7676,
+    106.2188,
+    98.2536,
+    94.457,
+    89.0111,
+    83.0904,
+    78.1248,
+    72.0656,
+    68.1239,
+    65.0882,
+    61.7535,
+    59.2806,
+    57.0831,
+    55.4257,
+    54.2599,
+    53.4702,
+    52.7472,
+    52.3211
+  ],
+  "features": {
+    "finite": true,
+    "dim": 512,
+    "effective_rank": 156.0,
+    "mean_std": 0.4809
+  }
+}

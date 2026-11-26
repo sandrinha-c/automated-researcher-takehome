@@ -1,0 +1,28 @@
+--- 009_loop/algorithm.py
++++ 012_loop/algorithm.py
+@@ -11,6 +11,9 @@
+ - The loss is multiplied by a scale factor (0.1, as in solo-learn's CIFAR
+   Barlow Twins recipe). This tames the very large gradients that come from
+   summing over a 2048x2048 cross-correlation matrix.
++- ResNet-18 built with zero_init_residual=True: the last BN in each residual
++  block starts at gamma=0, so every block is an identity map at init. This
++  stabilises early training under high-lr SGD without warmup.
+ """
+ import torch
+ import torch.nn as nn
+@@ -65,12 +68,13 @@
+ 
+     def __init__(self, proj_hidden_dim=2048, proj_output_dim=2048):
+         super().__init__()
+-        # ResNet-18 backbone (remove final FC)
+-        backbone = models.resnet18(weights=None)
++        # ResNet-18 backbone (remove final FC); residual branches zero-initialised
++        backbone = models.resnet18(weights=None, zero_init_residual=True)
+         self.backbone_dim = backbone.fc.in_features  # 512
+         backbone.fc = nn.Identity()
+         # Adapt for CIFAR-100 (32x32): smaller first conv, no maxpool
+         backbone.conv1 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
++        nn.init.kaiming_normal_(backbone.conv1.weight, mode="fan_out", nonlinearity="relu")
+         backbone.maxpool = nn.Identity()
+         self.backbone = backbone
+         self.projector = ProjectionHead(self.backbone_dim, proj_hidden_dim, proj_output_dim)

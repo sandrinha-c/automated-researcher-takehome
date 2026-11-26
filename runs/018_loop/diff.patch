@@ -1,0 +1,20 @@
+--- 017_loop/algorithm.py
++++ 018_loop/algorithm.py
+@@ -16,6 +16,8 @@
+   optimizer schedule itself has no warmup).
+ - Lower base learning rate (0.05): accuracy and feature rank went up
+   steadily as LR came down from 0.8.
++- Weight decay 5e-4, the usual value for SGD-trained CIFAR models. This
++  restores the per-step decay strength that was lost when the LR was lowered.
+ """
+ import torch
+ import torch.nn as nn
+@@ -111,7 +113,7 @@
+         'linear_eval_epochs': 100,
+         'batch_size': 512,
+         'lr': 0.05,
+-        'weight_decay': 1e-4,
++        'weight_decay': 5e-4,
+         'lambda_param': 5e-3,       # Barlow Twins off-diagonal penalty
+         'linear_lr': 0.1,
+         'linear_batch_size': 256,

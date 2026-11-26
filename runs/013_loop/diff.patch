@@ -1,0 +1,50 @@
+--- 009_loop/algorithm.py
++++ 013_loop/algorithm.py
+@@ -11,6 +11,9 @@
+ - The loss is multiplied by a scale factor (0.1, as in solo-learn's CIFAR
+   Barlow Twins recipe). This tames the very large gradients that come from
+   summing over a 2048x2048 cross-correlation matrix.
++- Linear warmup of the loss scale over the first training steps. With SGD,
++  scaling the loss scales the gradient, so this acts as an LR warmup (the
++  optimizer schedule itself has no warmup).
+ """
+ import torch
+ import torch.nn as nn
+@@ -19,13 +22,25 @@
+ 
+ 
+ class BarlowTwinsLoss(nn.Module):
+-    """Barlow Twins loss: cross-correlation matrix -> identity (scaled)."""
++    """Barlow Twins loss: cross-correlation matrix -> identity (scaled, with warmup)."""
+ 
+-    def __init__(self, lambda_param=5e-3, embedding_dim=2048, scale_loss=0.1):
++    def __init__(self, lambda_param=5e-3, embedding_dim=2048, scale_loss=0.1,
++                 warmup_steps=200):
+         super().__init__()
+         self.lambda_param = lambda_param
+         self.scale_loss = scale_loss
++        self.warmup_steps = warmup_steps
+         self.bn = nn.BatchNorm1d(embedding_dim, affine=False)
++        self.register_buffer("step", torch.zeros((), dtype=torch.long))
++
++    def _warmup_factor(self):
++        if not (self.training and torch.is_grad_enabled()):
++            return 1.0
++        s = int(self.step.item())
++        self.step += 1
++        if s >= self.warmup_steps:
++            return 1.0
++        return float(s + 1) / float(self.warmup_steps)
+ 
+     def forward(self, z1, z2):
+         z1 = self.bn(z1)
+@@ -38,7 +53,8 @@
+         # Loss: on-diagonal -> 1, off-diagonal -> 0
+         on_diag = (1 - c.diagonal()).pow(2).sum()
+         off_diag = c.flatten()[:-1].view(c.shape[0] - 1, c.shape[0] + 1)[:, 1:].flatten().pow(2).sum()
+-        return self.scale_loss * (on_diag + self.lambda_param * off_diag)
++        factor = self._warmup_factor()
++        return factor * self.scale_loss * (on_diag + self.lambda_param * off_diag)
+ 
+ 
+ class ProjectionHead(nn.Module):

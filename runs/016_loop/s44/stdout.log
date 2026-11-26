@@ -1,0 +1,1 @@
+LOCAL_EVAL budget={'pretrain_epochs': 20, 'linear_eval_epochs': 100, 'batch_size': 512, 'linear_batch_size': 256, 'linear_lr': 0.1} seed=44 linear_probe_seed=102 deterministic=True (harness log lines showing seed=100 are overridden when seed!=42)

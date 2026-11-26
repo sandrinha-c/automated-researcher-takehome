@@ -1,0 +1,176 @@
+You are improving a self-supervised learning method (Barlow Twins, ResNet-18, CIFAR-100).
+The score is validation accuracy (in %) of a linear probe on the frozen backbone. Higher is better.
+Every training run has 20 pretrain epochs and is deterministic for a given code and seed.
+
+How a candidate is judged (fixed rules in the controller, not your decision):
+- It is first trained once with seed 42. If that score is more than 1 point(s) below the
+  current best's score on that seed, it is dropped without further runs (screened_out).
+- Otherwise it is also trained with seeds 43, 44. It replaces the current best only if its
+  mean over the 3 seeds is strictly greater than the current best's mean.
+- Noise: the current best (009_loop) scores 20.03, 22.01, 19.07 on the 3 seeds. A difference
+  in mean below about 2.5 points is within noise, so prefer a change that should help
+  clearly on every seed over a small tweak.
+- A run is killed after 40 minutes.
+
+Rules:
+- Return the COMPLETE new algorithm.py in one ```python block. Nothing else is editable.
+- Keep these top-level names: get_model, get_training_config, get_augmentation, BarlowTwinsLoss.
+- The model must set self.backbone, self.projector and self.backbone_dim.
+- Imports are limited to: collections, copy, dataclasses, functools, itertools, math, numpy, random, torch, torchvision, typing, warnings.
+- No file access, no dataset loading, no downloads (so no pretrained weights), and do not
+  set seeds or deterministic flags. Do not mention the evaluator or split file names.
+- pretrain_epochs, linear_eval_epochs, batch_size, linear_batch_size and linear_lr are
+  overridden by the evaluator, so changing them has no effect.
+- One focused change per proposal, and not the same code as an earlier experiment.
+
+How the evaluator uses your file (it is fixed and you cannot change it):
+- config = get_training_config() must contain lr, weight_decay and lambda_param.
+- The loss is built as BarlowTwinsLoss(lambda_param=config["lambda_param"], embedding_dim=2048)
+  and called as loss(z1, z2). Its own parameters are NOT passed to the optimizer.
+- model(x) must return (features, projections); features must have backbone_dim columns.
+- Pretraining is SGD(model.parameters(), lr, momentum=0.9, weight_decay) with a cosine
+  schedule over the epochs and no warmup. One optimizer step per batch of two views.
+- get_augmentation() is called once and applied to a PIL image, twice per image, inside
+  DataLoader worker processes: it must be picklable (no lambda, no local function).
+
+What the list of experiments shows for each candidate: its scores per seed, the code lines
+it changed against its parent (comments and docstrings left out), the mean pretrain loss of
+every epoch (not comparable between different loss functions; "nan" = diverged) and two
+numbers about the frozen features of the validation images: effective rank (1 = collapsed
+to one direction, 512 = all dimensions used for a 512-d backbone) and mean standard deviation.
+Use them to reason about WHY a candidate did what it did.
+
+Reply format:
+HYPOTHESIS: <one sentence: what you change and why it should help>
+CATEGORY: <one of: augmentation, loss, architecture, optimisation, other>
+BASIS: <known | results | both> - <known = a recipe you recall from papers or other code;
+results = you reasoned from the experiments below; say which experiment ids you used>
+```python
+<full algorithm.py>
+```
+
+Experiments so far (current best = 009_loop, mean 20.37):
+- 009_loop [baseline] | seed 42=20.03, seed 43=22.01, seed 44=19.07, mean=20.37
+    hypothesis: Final best of an earlier single-seed loop (seed 42 only). History there: unmodified baseline 17.01 on seed 42 (and 9.47 / 9.53 on seeds 43 / 44, where its training was unstable); removing GaussianBlur 18.40 (accepted); then RandomResizedCrop scale (0.2,1.0) -> (0.35,1.0) 16.09 (rejected); then loss x 0.1 = this code.
+    pretrain loss, first -> last epoch: 176.6455 -> 107.0853
+
+Categories so far: augmentation: 0 tried / 0 accepted, loss: 0 tried / 0 accepted, architecture: 0 tried / 0 accepted, optimisation: 0 tried / 0 accepted, other: 0 tried / 0 accepted
+
+Current best algorithm.py:
+```python
+"""
+Self-supervised learning algorithm: Barlow Twins on CIFAR-100.
+
+Barlow Twins learns representations by minimizing redundancy between
+embedding dimensions via a cross-correlation loss. It does NOT require
+negative pairs or momentum encoders, just two augmented views.
+
+Changes vs. baseline:
+- GaussianBlur removed from the augmentation pipeline, since it is harmful
+  at 32x32 resolution.
+- The loss is multiplied by a scale factor (0.1, as in solo-learn's CIFAR
+  Barlow Twins recipe). This tames the very large gradients that come from
+  summing over a 2048x2048 cross-correlation matrix.
+"""
+import torch
+import torch.nn as nn
+import torchvision.models as models
+import torchvision.transforms as transforms
+
+
+class BarlowTwinsLoss(nn.Module):
+    """Barlow Twins loss: cross-correlation matrix -> identity (scaled)."""
+
+    def __init__(self, lambda_param=5e-3, embedding_dim=2048, scale_loss=0.1):
+        super().__init__()
+        self.lambda_param = lambda_param
+        self.scale_loss = scale_loss
+        self.bn = nn.BatchNorm1d(embedding_dim, affine=False)
+
+    def forward(self, z1, z2):
+        z1 = self.bn(z1)
+        z2 = self.bn(z2)
+        batch_size = z1.shape[0]
+
+        # Cross-correlation matrix
+        c = z1.T @ z2 / batch_size
+
+        # Loss: on-diagonal -> 1, off-diagonal -> 0
+        on_diag = (1 - c.diagonal()).pow(2).sum()
+        off_diag = c.flatten()[:-1].view(c.shape[0] - 1, c.shape[0] + 1)[:, 1:].flatten().pow(2).sum()
+        return self.scale_loss * (on_diag + self.lambda_param * off_diag)
+
+
+class ProjectionHead(nn.Module):
+    """3-layer projection head for Barlow Twins."""
+
+    def __init__(self, input_dim=512, hidden_dim=2048, output_dim=2048):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.BatchNorm1d(hidden_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(hidden_dim, output_dim),
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class BarlowTwinsModel(nn.Module):
+    """ResNet-18 backbone + projection head for Barlow Twins."""
+
+    def __init__(self, proj_hidden_dim=2048, proj_output_dim=2048):
+        super().__init__()
+        # ResNet-18 backbone (remove final FC)
+        backbone = models.resnet18(weights=None)
+        self.backbone_dim = backbone.fc.in_features  # 512
+        backbone.fc = nn.Identity()
+        # Adapt for CIFAR-100 (32x32): smaller first conv, no maxpool
+        backbone.conv1 = nn.Conv2d(3, 64, 3, 1, 1, bias=False)
+        backbone.maxpool = nn.Identity()
+        self.backbone = backbone
+        self.projector = ProjectionHead(self.backbone_dim, proj_hidden_dim, proj_output_dim)
+
+    def forward(self, x):
+        features = self.backbone(x)
+        projections = self.projector(features)
+        return features, projections
+
+
+def get_model():
+    """Return Barlow Twins model."""
+    return BarlowTwinsModel(proj_hidden_dim=2048, proj_output_dim=2048)
+
+
+def get_training_config():
+    """Return Barlow Twins training config (compute-constrained)."""
+    return {
+        'pretrain_epochs': 130,
+        'linear_eval_epochs': 100,
+        'batch_size': 512,
+        'lr': 0.4,
+        'weight_decay': 1e-4,
+        'lambda_param': 5e-3,       # Barlow Twins off-diagonal penalty
+        'linear_lr': 0.1,
+        'linear_batch_size': 256,
+    }
+
+
+def get_augmentation():
+    """Return augmentation transforms for Barlow Twins (no blur for 32x32 images)."""
+    mean = (0.5071, 0.4867, 0.4408)
+    std = (0.2675, 0.2565, 0.2761)
+
+    return transforms.Compose([
+        transforms.RandomResizedCrop(32, scale=(0.2, 1.0)),
+        transforms.RandomHorizontalFlip(),
+        transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+        transforms.RandomGrayscale(p=0.2),
+        transforms.ToTensor(),
+        transforms.Normalize(mean, std),
+    ])
+```

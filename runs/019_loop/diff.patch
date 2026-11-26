@@ -1,0 +1,23 @@
+--- 018_loop/algorithm.py
++++ 019_loop/algorithm.py
+@@ -16,8 +16,9 @@
+   optimizer schedule itself has no warmup).
+ - Lower base learning rate (0.05): accuracy and feature rank went up
+   steadily as LR came down from 0.8.
+-- Weight decay 5e-4, the usual value for SGD-trained CIFAR models. This
+-  restores the per-step decay strength that was lost when the LR was lowered.
++- Weight decay 5e-4, the usual value for SGD-trained CIFAR models.
++- RandomResizedCrop min scale 0.08 (standard SSL recipe): stronger crop
++  augmentation, which gives a harder invariance task and richer features.
+ """
+ import torch
+ import torch.nn as nn
+@@ -126,7 +127,7 @@
+     std = (0.2675, 0.2565, 0.2761)
+ 
+     return transforms.Compose([
+-        transforms.RandomResizedCrop(32, scale=(0.2, 1.0)),
++        transforms.RandomResizedCrop(32, scale=(0.08, 1.0)),
+         transforms.RandomHorizontalFlip(),
+         transforms.RandomApply([transforms.ColorJitter(0.4, 0.4, 0.4, 0.1)], p=0.8),
+         transforms.RandomGrayscale(p=0.2),

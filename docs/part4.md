@@ -1,76 +1,111 @@
 # Part 4 — main limitation and one controlled improvement
 
-A proposal only. Nothing on this page has been run.
+The proposal below takes one observation of the pilot run (README, "Pilot run beyond the
+brief") and changes one factor. The control group already exists; the experimental
+search was started on 2026-11-26 and is recorded in `docs/explore_experiment.md`.
 
-## Main limitation: selection on a single seed
+## Main limitation: the loop explores only when progress stalls
 
-The loop accepts a candidate if its validation accuracy at seed 42 is strictly greater
-than the current best. One run at one seed is the only evidence.
+The pilot run had a rule for changing direction: after two candidates in a row that ran
+but did not become the new best, a proposal of the same kind as the last failure is
+refused. In the run this condition never occurred.
 
-| Evidence (20 pretrain epochs, deterministic mode) | Value |
+| Evidence from the pilot run (`loop_multiseed/runs.jsonl`) | Value |
 |---|---|
-| Unmodified baseline at seeds 42 / 43 / 44 (runs 003, 005, 006) | 17.01% / 9.47% / 9.53% |
-| Baseline mean ± sample std over the three seeds | 12.0% ± 4.3 points |
-| Gain of accepted run 007 over its parent (seed 42) | +1.39 points |
-| Gain of accepted run 009 over its parent (seed 42) | +1.62 points |
-| Binomial standard error of one score (3,021 validation images) | about 0.7 points |
+| Times the explore rule fired | 0 of 8 candidates |
+| Candidates by kind | optimisation 6, architecture 1, augmentation 1, loss 0 |
+| Accepted candidates by kind | optimisation 4, all others 0 |
+| Candidates accepted | 4 of 8 |
 
-Each accepted gain is smaller than the spread of the unchanged baseline across seeds.
-Seed 42 is also the best of the three baseline seeds. The loop therefore cannot tell
-"this change is better" from "this change suits seed 42", and every further round
-selects on the same seed again.
+The LLM found that changes to the step size worked (warmup of the loss scale, then three
+steps down in learning rate, then weight decay) and stayed with them. That direction
+also produced the whole gain, from 20.37% to 48.00%. So the limitation is not that the
+run did badly. It is that the run cannot say whether the same budget, partly spent on
+other kinds of change, would have found a better candidate: the question was never put.
 
 ## Hypothesis
 
-Accepting on the mean of several seeds picks changes that hold up on unseen seeds better
-than accepting on seed 42 alone, even though it can test fewer ideas for the same GPU
-time.
+With exploration at a fixed ratio, the search reaches a better best for the same
+training budget than with exploration that starts only on stagnation.
+
+The literature expects the opposite in this situation. The FML-bench paper [1] reports
+that "greedy search tends to be more effective when opportunities are dense, while
+tree-search and evolutionary strategies tend to be more effective when opportunities are
+sparse", and that final performance is associated with early convergence and
+directionally focused exploration, not with solution diversity. In the pilot run half of
+the candidates were accepted, which is the dense case.
 
 ## Comparison
 
-Two arms. Everything is identical except the acceptance rule: same controller, model,
-prompt, starting point, evaluator, 20-epoch budget and validation split.
+Two groups. Only the explore rule differs.
 
-| | Arm A (current) | Arm B (proposed) |
+| | Control | Experimental |
 |---|---|---|
-| Runs per candidate | 1 (seed 42) | 3 (seeds 42, 43, 44) |
-| Accept if | score > best score | mean of 3 > best mean of 3, same seeds for both |
-| Feedback to the LLM | one score | three scores and their mean |
-| Candidates in 12 training runs (about 5.2 GPU hours) | 12 | 4 |
+| Status | done: the pilot run, candidates 012–019 | started 2026-11-26 |
+| Explore rule | on stagnation: after two candidates in a row without improvement, another kind is required | at a fixed ratio: every second candidate that is trained must be of the kind trained least so far; the program names the kind and the LLM writes the change |
+| Closest published design | AdaptiveSearch in [1]: greedy first, explore on detecting stagnation | the fixed exploration ratio of OpenEvolve [5] (`exploration_ratio: 0.2` by default), applied to a sequential loop |
+| Command | `python controller.py --seeds 42,43,44 --max-runs 23` | the same, with `--explore-every 2` |
 
-The baseline's three scores for arm B already exist (runs 003, 005, 006).
+The same in both: the starting point (009, with its scores on seeds 42, 43 and 44), the
+screening on seed 42 (a candidate more than 1 point behind is dropped), acceptance on
+the mean of three seeds, the limit of 23 training runs, the model and effort, the
+evaluator and the 20-epoch budget, and the prompt template apart from the explore
+instruction.
 
-**Held-out check.** Afterwards, the baseline, the final best of arm A and the final best
-of arm B are each trained on five seeds that neither arm used (45–49), still on the
-validation split. That is 15 more runs, about 6.5 GPU hours. The hidden test split is
-not used.
+The ratio is one in two, not OpenEvolve's 0.2, because 23 training runs give only about
+ten candidates; at 0.2 only about two of them would be assigned.
 
-## Evaluation criteria
+Because the budget is the same in both groups, a difference cannot come from running
+longer. That was the open question of the pilot run against round 1.
 
-Fixed before running:
+## Evaluation criterion
 
-1. **Primary:** mean held-out accuracy over seeds 45–49, compared pairwise by seed.
-   The hypothesis is supported if arm B's best beats arm A's best on at least 4 of the 5
-   seeds and the mean difference is more than twice its standard error. Otherwise it is
-   not supported.
-2. **Did selection generalise?** For each arm, the gain over the baseline on the
-   selection seeds minus the gain on the held-out seeds. Closer to zero is better.
-3. **Real gain at all?** For each arm, whether its final best is above the baseline on
-   the held-out seeds (mean difference, and on how many of the 5 seeds).
-4. **Cost:** GPU hours per arm, kept equal by design, and the number of ideas tested
-   (12 against 4). This is the price of arm B and is reported next to the result.
+Fixed before the experimental search was started:
 
-## Known weaknesses of this design
+1. **Main measure.** The final best `algorithm.py` of each group is trained from scratch
+   on five seeds that neither group used (45–49), on the validation split. The measure
+   is the paired difference in accuracy per seed, reported as the mean and for each seed.
+2. **Reading it.** If the experimental group wins on at least four of the five seeds,
+   that is a first signal worth repeating. Bouthillier et al. [7] recommend a probability
+   of outperforming of 0.75 as the threshold for a meaningful difference; four of five
+   is 0.8 as a point estimate.
+3. **Also reported.** How many kinds of change each group tried, and how many produced
+   an accepted candidate (control: 3 tried, 1 with an accept).
+4. **Cost.** 23 training runs for the experimental search (about 9.5 GPU hours) and
+   10 runs for the five seeds of both final bests (about 4.3 GPU hours).
 
-- The LLM is not deterministic, so each arm is a single loop run. A clear result would
-  need the two-arm comparison repeated.
-- Seeds 43 and 44 start from a much lower baseline (about 9.5%), so arm B's mean may be
-  dominated by whether a change rescues those two seeds.
-- Three seeds give a rough mean. The rule "strictly greater mean" still accepts small
-  differences; a margin could be added once the held-out spread is known.
+## What this can and cannot show
 
-## Cheapest first step
+- The five seeds compare two final `algorithm.py` files. They measure whether one file
+  is better than the other on seeds it was not selected on.
+- Each search strategy is run once, and the LLM is not deterministic. A win for either
+  group may come from one lucky proposal. Saying which strategy is better in general
+  needs several independent full searches per strategy.
+- Five seeds give little statistical power; [7] arrives at about 29 runs for its
+  recommended threshold. An unclear result means adding seeds.
+- "Only the explore rule differs" is true of the rules. The assigned candidates also
+  change which categories the LLM sees as tried in later prompts; that is an effect of
+  the rule, not a second difference.
+- The experimental group may lose. The control's 48% came from four accepted steps in a
+  row in one direction; the experimental group spends half its candidates elsewhere.
+  That result would agree with [1] and is reported in the same way.
 
-Re-run the three existing candidates (007, 008, 009) at seeds 43 and 44: six runs, about
-2.6 GPU hours, no LLM calls. This shows directly whether the three decisions the loop
-already made would have been the same under the three-seed rule.
+## Earlier version of this proposal
+
+Until 2026-11-26 this file proposed a different comparison: accepting on one seed
+against accepting on the mean of three, at equal budget. Its motivation still stands
+(the two gains round 1 accepted, +1.39 and +1.62 points, are smaller than the 1.8 points
+between identical runs of the baseline and the 7.5 points between seeds). It was
+replaced because the three-seed rule was already implemented and used in the pilot run,
+so it was no longer a proposal, and because the pilot run pointed to a question that was
+still open. That comparison was not run. A replay of the pilot run's eight decisions
+with seed 42 only gives the same accept or reject for six of them (README), so the pilot
+run does not show that the three-seed rule helped.
+
+## References
+
+[1] Q. Zou et al. FML-bench: A controlled study of AI research agent strategies from
+the perspective of search dynamics. arXiv:2605.17373v2, 2026.
+[5] A. Sharma. OpenEvolve: An open-source evolutionary coding agent. GitHub, 2025.
+[7] X. Bouthillier et al. Accounting for Variance in Machine Learning Benchmarks.
+Proceedings of Machine Learning and Systems (MLSys) 3, 2021.

@@ -6,6 +6,12 @@ Both figures are drawn by [tools/make_figures.py](../tools/make_figures.py):
 python tools/make_figures.py --png
 ```
 
+The figure of the multi-seed search is drawn by
+[tools/make_search_figure.py](../tools/make_search_figure.py) from
+`loop_multiseed/runs.jsonl`; only the short label of each change is typed by hand.
+
+![Multi-seed search](search.svg)
+
 ## Architecture (Part 2A)
 
 ![Architecture of the research loop](architecture.svg)
@@ -46,5 +52,7 @@ version, because the program, not the LLM, decides what is kept and what the nex
 proposal starts from.
 
 What it does not show: that either accepted change is a real improvement. Every score
-is one run with seed 42, and the baseline alone varies by ±4.3 points across seeds
-42/43/44 (see the README), which is more than the +1.4 and +3.0 point gains here.
+is one run with seed 42. The unchanged baseline, with the same seed, scored between
+17.01% and 18.80% in three runs (001–003), and 9.5% on seeds 43 and 44 (see the README).
+The two accepted steps are +1.4 and +1.6 points (+3.0 in total), so each single step is
+within what the baseline does by itself.

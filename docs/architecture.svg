@@ -69,9 +69,9 @@
 <rect x="522.0" y="348.0" width="372.0" height="112.0" rx="6" fill="#f0efec" stroke="#c3c2b7" stroke-width="1.5"/>
 <text x="534.0" y="370.0" font-size="15" fill="#0b0b0b" font-weight="700" text-anchor="start" xml:space="preserve">Evaluator</text>
 <text x="534.0" y="390.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="start" font-family="Consolas, Menlo, monospace" xml:space="preserve">local_eval.py → task/train_eval_baseline.py</text>
-<text x="534.0" y="410.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">official evaluator, never edited: hashes are checked before</text>
-<text x="534.0" y="426.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">and after each run. Same budget (20 pretrain epochs), same</text>
-<text x="534.0" y="442.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">seed (42), validation split only: test labels are never read.</text>
+<text x="534.0" y="410.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">official evaluator, never edited: hashes checked before and</text>
+<text x="534.0" y="426.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">after each run. Same budget (20 pretrain epochs) and seeds</text>
+<text x="534.0" y="442.0" font-size="12" fill="#0b0b0b" font-weight="normal" text-anchor="start" xml:space="preserve">for all runs. Selection on the validation split, not on test.</text>
 <path d="M714.0,285.0 L714.0,345.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
 <path d="M774.0,345.0 L774.0,285.0" fill="none" stroke="#52514e" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow)"/>
 <text x="706.0" y="320.0" font-size="12" fill="#52514e" font-weight="normal" text-anchor="end" xml:space="preserve">runs</text>

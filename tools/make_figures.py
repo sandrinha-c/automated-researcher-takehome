@@ -399,9 +399,9 @@ def draw_architecture(out_path):
     svg.rect(ex, ly, ew, 112, RULE_FILL, RULE_EDGE, sw=1.5)
     svg.text(ex + 12, ly + 22, "Evaluator", 15, weight="700")
     svg.text(ex + 12, ly + 42, "local_eval.py → task/train_eval_baseline.py", 12, INK2, mono=True)
-    svg.lines(ex + 12, ly + 62, ["official evaluator, never edited: hashes are checked before",
-                                 "and after each run. Same budget (20 pretrain epochs), same",
-                                 "seed (42), validation split only: test labels are never read."], 12, gap=16)
+    svg.lines(ex + 12, ly + 62, ["official evaluator, never edited: hashes checked before and",
+                                 "after each run. Same budget (20 pretrain epochs) and seeds",
+                                 "for all runs. Selection on the validation split, not on test."], 12, gap=16)
     svg.path([(mid[3] - 30, top + bh + 3), (mid[3] - 30, ly - 3)], arrow=True)
     svg.path([(mid[3] + 30, ly - 3), (mid[3] + 30, top + bh + 3)], arrow=True)
     svg.text(mid[3] - 38, top + bh + 38, "runs", 12, INK2, anchor="end")
